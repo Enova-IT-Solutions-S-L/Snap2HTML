@@ -5,6 +5,7 @@ using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
 using Snap2HTML.Services.Validation;
+using Snap2HTML.Services.Validation.Archive;
 using Snap2HTML.Services.Validation.Audio;
 using Snap2HTML.Services.Validation.Image;
 using Snap2HTML.Services.Validation.Pdf;
@@ -26,7 +27,8 @@ public class FolderScanner : IFolderScanner
             new ImageIntegrityValidator(),
             new PdfIntegrityValidator(),
             new VideoIntegrityValidator(),
-            new AudioIntegrityValidator()))
+            new AudioIntegrityValidator(),
+            new ArchiveIntegrityValidator()))
     {
     }
 
