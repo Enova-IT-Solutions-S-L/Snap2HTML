@@ -124,7 +124,7 @@ public class MainFormPresenter
                 SkipHiddenItems = settings.SkipHiddenItems,
                 SkipSystemItems = settings.SkipSystemItems,
                 EnableHashing = settings.EnableHashing,
-                ImageIntegrityLevel = settings.ImageIntegrityLevel
+                IntegrityLevel = settings.IntegrityLevel
             };
 
             // Create progress reporter for scanning

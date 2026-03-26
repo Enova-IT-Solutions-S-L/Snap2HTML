@@ -5,6 +5,8 @@ using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
 using Snap2HTML.Services.Validation;
+using Snap2HTML.Services.Validation.Image;
+using Snap2HTML.Services.Validation.Pdf;
 
 namespace Snap2HTML.Services.Scanning;
 
@@ -15,14 +17,16 @@ namespace Snap2HTML.Services.Scanning;
 public class FolderScanner : IFolderScanner
 {
     private readonly IFileSystemAbstraction _fileSystem;
-    private readonly IImageIntegrityValidator _integrityValidator;
+    private readonly IIntegrityValidatorAggregator _integrityValidator;
 
     public FolderScanner(IFileSystemAbstraction fileSystem)
-        : this(fileSystem, new ImageIntegrityValidator())
+        : this(fileSystem, new IntegrityValidatorAggregator(
+            new ImageIntegrityValidator(),
+            new PdfIntegrityValidator()))
     {
     }
 
-    public FolderScanner(IFileSystemAbstraction fileSystem, IImageIntegrityValidator integrityValidator)
+    public FolderScanner(IFileSystemAbstraction fileSystem, IIntegrityValidatorAggregator integrityValidator)
     {
         _fileSystem = fileSystem;
         _integrityValidator = integrityValidator;
@@ -357,9 +361,9 @@ public class FolderScanner : IFolderScanner
 
             // Validate image integrity if enabled
             var integrityStatus = IntegrityStatus.Unknown;
-            if (options.ImageIntegrityLevel != IntegrityValidationLevel.None)
+            if (options.IntegrityLevel != IntegrityValidationLevel.None)
             {
-                integrityStatus = ValidateImageIntegrity(filePath, options.ImageIntegrityLevel);
+                integrityStatus = ValidateIntegrity(filePath, options.IntegrityLevel);
             }
 
             return new SnappedFile(
@@ -378,13 +382,13 @@ public class FolderScanner : IFolderScanner
     }
 
     /// <summary>
-    /// Validates image integrity synchronously.
+    /// Validates file integrity synchronously.
     /// Note: This uses blocking wait on an async operation because the validation is fast (mostly I/O)
     /// and making the entire CreateSnappedFile/ProcessDirectory chain async would require significant
     /// architectural changes. For large directory scans, the parallel processing approach already
     /// provides good throughput.
     /// </summary>
-    private IntegrityStatus ValidateImageIntegrity(string filePath, IntegrityValidationLevel level)
+    private IntegrityStatus ValidateIntegrity(string filePath, IntegrityValidationLevel level)
     {
         try
         {

@@ -28,9 +28,9 @@ public class ScanOptions
     public bool EnableHashing { get; set; }
 
     /// <summary>
-    /// The level of image integrity validation to perform.
+    /// The level of file integrity validation to perform.
     /// </summary>
-    public IntegrityValidationLevel ImageIntegrityLevel { get; set; } = IntegrityValidationLevel.None;
+    public IntegrityValidationLevel IntegrityLevel { get; set; } = IntegrityValidationLevel.None;
 
     /// <summary>
     /// Maximum degree of parallelism for scanning operations.

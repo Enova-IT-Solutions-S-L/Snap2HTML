@@ -251,9 +251,9 @@
 			this.lblIntegrityLevel.AutoSize = true;
 			this.lblIntegrityLevel.Location = new System.Drawing.Point(160, 79);
 			this.lblIntegrityLevel.Name = "lblIntegrityLevel";
-			this.lblIntegrityLevel.Size = new System.Drawing.Size(83, 13);
+			this.lblIntegrityLevel.Size = new System.Drawing.Size(73, 13);
 			this.lblIntegrityLevel.TabIndex = 20;
-			this.lblIntegrityLevel.Text = "Image integrity:";
+			this.lblIntegrityLevel.Text = "File integrity:";
 			// 
 			// cmbIntegrityLevel
 			// 
@@ -261,13 +261,13 @@
 			this.cmbIntegrityLevel.FormattingEnabled = true;
 			this.cmbIntegrityLevel.Items.AddRange(new object[] {
             "None",
-            "Magic Bytes Only",
-            "Full Decode"});
-			this.cmbIntegrityLevel.Location = new System.Drawing.Point(248, 76);
+            "Header Only",
+            "Full Validation"});
+			this.cmbIntegrityLevel.Location = new System.Drawing.Point(240, 76);
 			this.cmbIntegrityLevel.Name = "cmbIntegrityLevel";
-			this.cmbIntegrityLevel.Size = new System.Drawing.Size(72, 21);
+			this.cmbIntegrityLevel.Size = new System.Drawing.Size(100, 21);
 			this.cmbIntegrityLevel.TabIndex = 21;
-			this.toolTip1.SetToolTip(this.cmbIntegrityLevel, "Validate image file integrity (None=disabled, Magic Bytes=fast header check, Full Decode=thorough validation)");
+			this.toolTip1.SetToolTip(this.cmbIntegrityLevel, "Validate file integrity for supported formats (images, PDFs).\nNone = disabled\nHeader Only = fast magic bytes check\nFull Validation = thorough format-specific validation");
 			// 
 			// cmdCreate
 			// 

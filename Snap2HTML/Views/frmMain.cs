@@ -287,7 +287,7 @@ public partial class frmMain : Form, IMainFormView
             LinkFiles = chkLinkFiles.Checked,
             LinkRoot = txtLinkRoot.Text,
             EnableHashing = chkEnableHash.Checked,
-            ImageIntegrityLevel = integrityLevel,
+            IntegrityLevel = integrityLevel,
         };
 
         StartProcessing(settings);

@@ -189,7 +189,7 @@ public class HtmlGenerator : IHtmlGenerator
         //        Note that forward slashes are used instead of (Windows style) backslashes
         //      Then, for each each file in the directory: "filename*size of file*file modified date*hash*integrityStatus"
         //        The hash field is always present (empty string if hashing disabled)
-        //        The integrityStatus field is always present (0=Unknown, 1=Valid, 2=InvalidMagicBytes, 3=DecodingFailed, 4=NotAnImage)
+        //        The integrityStatus field is always present (0=Unknown, 1=Valid, 2=InvalidMagicBytes, 3=DecodingFailed, 4=NotSupported)
         //      Second to last item in array tells the total size of directory content
         //      Last item in array references IDs to all subdirectories of this dir (if any).
         //        ID is the item index in dirs array.
