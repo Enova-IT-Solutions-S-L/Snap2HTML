@@ -247,6 +247,7 @@
 			this.chkEnableHash.Text = "Generate file hashes";
 			this.toolTip1.SetToolTip(this.chkEnableHash, "Compute SHA256 hash for each file (slower scanning)");
 			this.chkEnableHash.UseVisualStyleBackColor = true;
+			this.chkEnableHash.CheckedChanged += new System.EventHandler(this.chkEnableHash_CheckedChanged);
 			// 
 			// lblIntegrityLevel
 			// 

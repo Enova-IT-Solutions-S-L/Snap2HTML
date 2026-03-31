@@ -347,6 +347,25 @@ public partial class frmMain : Form, IMainFormView
         txtLinkRoot.Enabled = chkLinkFiles.Checked;
     }
 
+    private void chkEnableHash_CheckedChanged(object sender, EventArgs e)
+    {
+        if (!_initDone || _runningAutomated || !chkEnableHash.Checked) return;
+
+        var result = MessageBox.Show(
+            "Generating SHA-256 hashes for every file can significantly increase scanning time " +
+            "and the size of the generated HTML report, especially for large folder trees.\n\n" +
+            "Do you want to enable file hashing?",
+            "Enable File Hashing",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+
+        if (result != DialogResult.Yes)
+        {
+            chkEnableHash.Checked = false;
+        }
+    }
+
     private void lnkSupportedFormats_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
         var formats = IntegrityValidatorAggregator.CreateDefault().GetSupportedFormats();
