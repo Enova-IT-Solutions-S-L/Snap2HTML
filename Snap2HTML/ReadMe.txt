@@ -1,16 +1,18 @@
 
  --- Snap2HTML ----------------------------------------------------------------
  
-  Freeware by RL Vision (c) 2011-2020
-  Homepage: http://www.rlvision.com
+  Originally by RL Vision (c) 2011-2020
+  Extended by Enova IT Solutions S.L. (c) 2025-2026
+  Homepage: https://github.com/Enova-IT-Solutions-S-L/Snap2HTML
+  Original: http://www.rlvision.com
   
   Portable:
     - Just unzip and run
     - Settings are saved in the application folder
 
   Free Open Source Software:
-    - Source code available at GitHub: https://github.com/rlv-dan
-  
+    - Licensed under GNU GPL v3
+    - Source code available at GitHub
 
  --- About --------------------------------------------------------------------
  
@@ -246,11 +248,39 @@
 	Searches returning lots of items should be a bit faster now
     And a few smaller fixes as usual
 
+  v3.0 (2026-03-31) - Enova IT Solutions S.L.
+    Modernized to .NET 8.0 with SDK-style project and latest C# features
+    Layered MVP architecture (Core, Infrastructure, Services, Presenters, Views)
+    File integrity validation for 8 format families:
+      - Images (JPEG, PNG, GIF, BMP, WebP, TIFF) - header + full validation
+      - PDF - header validation
+      - Video (MP4, AVI, MKV, WebM, FLV, WMV, MPEG, etc.) - header validation
+      - Audio (MP3, WAV, FLAC, AAC, OGG, WMA, M4A, AIFF, etc.) - header validation
+      - Archives (ZIP, RAR, 7z, GZIP, TAR, BZ2, XZ, ZSTD, LZ4, CAB, ISO) - header
+      - Documents (Office OLE2/OOXML, OpenDocument, RTF) - header validation
+      - SQLite databases - header validation
+      - SQL Server data files (MDF/NDF) - header validation
+    SHA-256 file hashing with parallel computation
+    High-performance async scanning pipeline with Parallel.ForEachAsync
+    Channel-based producer/consumer for batch integrity validation
+    ConcurrentDictionary with lock-free Interlocked counters
+    Supported formats dialog with DataGridView table
+    GitHub Actions CI/CD workflow for builds and releases
+
+
+ --- Contributors --------------------------------------------------------------
+
+  rlv-dan (RL Vision) - Original author (v1.0 - v2.14)
+  Rafael Popescu (Enova IT Solutions S.L.) - Maintainer (v3.0+)
+
 
  --- End User License Agreement -----------------------------------------------
   
-  RL Vision can not be held responsible for any damages whatsoever, direct or 
-  indirect, caused by this software or other material from RL Vision.
+  This software is licensed under the GNU General Public License v3.0.
+  See the LICENSE file for the full text.
+
+  RL Vision and Enova IT Solutions S.L. can not be held responsible for any
+  damages whatsoever, direct or indirect, caused by this software.
 
 
   --- Privacy Notice ----------------------------------------------------------

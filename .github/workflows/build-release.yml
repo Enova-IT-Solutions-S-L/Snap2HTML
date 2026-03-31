@@ -1,0 +1,83 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v2.14.0)'
+        required: true
+        default: 'v2.14.0'
+      create_release:
+        description: 'Create GitHub Release?'
+        required: true
+        type: boolean
+        default: false
+      self_contained:
+        description: 'Self-contained (no .NET runtime needed)?'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore Snap2HTML.sln
+
+      - name: Build Release
+        run: dotnet build Snap2HTML.sln -c Release --no-restore
+
+      - name: Publish
+        run: |
+          dotnet publish Snap2HTML/Snap2HTML.csproj -c Release -r win-x64 `
+            --self-contained ${{ inputs.self_contained }} `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o ./publish
+
+      - name: List publish output
+        run: Get-ChildItem ./publish -Recurse | Select-Object FullName, Length
+
+      - name: Create ZIP artifact
+        run: Compress-Archive -Path ./publish/* -DestinationPath ./Snap2HTML-${{ inputs.version }}-win-x64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Snap2HTML-${{ inputs.version }}-win-x64
+          path: ./Snap2HTML-${{ inputs.version }}-win-x64.zip
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: ${{ inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Snap2HTML ${{ inputs.version }}
+          body: |
+            ## Snap2HTML ${{ inputs.version }}
+
+            ### Download
+            - **Snap2HTML-${{ inputs.version }}-win-x64.zip** — Single-file executable for Windows x64
+
+            ### What's included
+            - `Snap2HTML.exe` — Main application
+            - `template.html` — HTML report template
+            - `ReadMe.txt` — Documentation
+          files: ./Snap2HTML-${{ inputs.version }}-win-x64.zip
+          draft: false
+          prerelease: false
