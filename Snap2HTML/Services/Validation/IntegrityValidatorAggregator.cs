@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Snap2HTML.Core.Models;
 using Snap2HTML.Services.Validation.Archive;
 using Snap2HTML.Services.Validation.Audio;
+using Snap2HTML.Services.Validation.Database;
 using Snap2HTML.Services.Validation.Document;
 using Snap2HTML.Services.Validation.Image;
 using Snap2HTML.Services.Validation.Pdf;
@@ -27,7 +28,8 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
         new VideoIntegrityValidator(),
         new AudioIntegrityValidator(),
         new ArchiveIntegrityValidator(),
-        new DocumentIntegrityValidator());
+        new DocumentIntegrityValidator(),
+        new DatabaseIntegrityValidator());
 
     /// <summary>
     /// Creates a new aggregator with the specified validators.
