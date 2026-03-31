@@ -6,12 +6,6 @@ using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
 using Snap2HTML.Services.Validation;
-using Snap2HTML.Services.Validation.Archive;
-using Snap2HTML.Services.Validation.Audio;
-using Snap2HTML.Services.Validation.Document;
-using Snap2HTML.Services.Validation.Image;
-using Snap2HTML.Services.Validation.Pdf;
-using Snap2HTML.Services.Validation.Video;
 
 namespace Snap2HTML.Services.Scanning;
 
@@ -25,13 +19,7 @@ public class FolderScanner : IFolderScanner
     private readonly IIntegrityValidatorAggregator _integrityValidator;
 
     public FolderScanner(IFileSystemAbstraction fileSystem)
-        : this(fileSystem, new IntegrityValidatorAggregator(
-            new ImageIntegrityValidator(),
-            new PdfIntegrityValidator(),
-            new VideoIntegrityValidator(),
-            new AudioIntegrityValidator(),
-            new ArchiveIntegrityValidator(),
-            new DocumentIntegrityValidator()))
+        : this(fileSystem, IntegrityValidatorAggregator.CreateDefault())
     {
     }
 

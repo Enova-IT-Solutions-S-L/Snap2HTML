@@ -9,6 +9,12 @@ namespace Snap2HTML.Services.Validation;
 public interface IIntegrityValidatorAggregator
 {
     /// <summary>
+    /// Returns support information for all registered format validators,
+    /// describing which validation levels each extension supports.
+    /// </summary>
+    IReadOnlyList<FormatSupportInfo> GetSupportedFormats();
+
+    /// <summary>
     /// Validates the integrity of a single file by dispatching to the appropriate validator.
     /// </summary>
     /// <param name="filePath">The path to the file to validate.</param>

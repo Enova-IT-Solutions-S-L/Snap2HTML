@@ -34,6 +34,12 @@ public class ImageIntegrityValidator : FileIntegrityValidatorBase, IImageIntegri
     private static readonly byte[] WebPSignature = { 0x57, 0x45, 0x42, 0x50 };
 
     /// <inheritdoc />
+    public override string CategoryName => "Images";
+
+    /// <inheritdoc />
+    public override bool SupportsFullValidation => true;
+
+    /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => ImageExtensions;
 
     /// <summary>

@@ -58,6 +58,9 @@ public class AudioIntegrityValidator : FileIntegrityValidatorBase, IAudioIntegri
     private static readonly byte[] FtypSignature = { 0x66, 0x74, 0x79, 0x70 }; // "ftyp"
 
     /// <inheritdoc />
+    public override string CategoryName => "Audio";
+
+    /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => AudioExtensions;
 
     /// <summary>

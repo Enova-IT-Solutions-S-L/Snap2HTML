@@ -6,6 +6,7 @@ using Snap2HTML.Presenters;
 using Snap2HTML.Services.CommandLine;
 using Snap2HTML.Services.Generation;
 using Snap2HTML.Services.Scanning;
+using Snap2HTML.Services.Validation;
 
 namespace Snap2HTML.Views;
 
@@ -344,6 +345,13 @@ public partial class frmMain : Form, IMainFormView
     private void chkLinkFiles_CheckedChanged(object sender, EventArgs e)
     {
         txtLinkRoot.Enabled = chkLinkFiles.Checked;
+    }
+
+    private void lnkSupportedFormats_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+    {
+        var formats = IntegrityValidatorAggregator.CreateDefault().GetSupportedFormats();
+        using var dialog = new frmSupportedFormats(formats);
+        dialog.ShowDialog(this);
     }
 
     // Link Label handlers

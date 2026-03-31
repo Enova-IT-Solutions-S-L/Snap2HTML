@@ -46,6 +46,9 @@ public class VideoIntegrityValidator : FileIntegrityValidatorBase, IVideoIntegri
     private static readonly byte[] FtypSignature = { 0x66, 0x74, 0x79, 0x70 }; // "ftyp"
 
     /// <inheritdoc />
+    public override string CategoryName => "Video";
+
+    /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => VideoExtensions;
 
     /// <summary>

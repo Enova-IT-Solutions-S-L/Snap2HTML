@@ -9,6 +9,16 @@ namespace Snap2HTML.Services.Validation;
 public interface IFileIntegrityValidator
 {
     /// <summary>
+    /// Display name for the format category (e.g., "Images", "Video", "Archives").
+    /// </summary>
+    string CategoryName { get; }
+
+    /// <summary>
+    /// Whether this validator implements full (deep) validation beyond magic bytes.
+    /// </summary>
+    bool SupportsFullValidation { get; }
+
+    /// <summary>
     /// The set of file extensions this validator supports (e.g., ".jpg", ".pdf").
     /// Extensions must include the leading dot and be lowercase.
     /// </summary>

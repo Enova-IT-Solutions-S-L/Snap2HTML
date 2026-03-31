@@ -20,6 +20,12 @@ public abstract class FileIntegrityValidatorBase : IFileIntegrityValidator
     protected virtual int MagicBytesBufferSize => 16;
 
     /// <inheritdoc />
+    public abstract string CategoryName { get; }
+
+    /// <inheritdoc />
+    public virtual bool SupportsFullValidation => false;
+
+    /// <inheritdoc />
     public abstract IReadOnlySet<string> SupportedExtensions { get; }
 
     /// <inheritdoc />

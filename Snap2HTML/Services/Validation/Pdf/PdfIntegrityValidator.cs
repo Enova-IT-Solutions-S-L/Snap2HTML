@@ -20,6 +20,9 @@ public class PdfIntegrityValidator : FileIntegrityValidatorBase, IPdfIntegrityVa
     private static readonly byte[] PdfSignature = { 0x25, 0x50, 0x44, 0x46 };
 
     /// <inheritdoc />
+    public override string CategoryName => "PDF";
+
+    /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => PdfExtensions;
 
     /// <inheritdoc />

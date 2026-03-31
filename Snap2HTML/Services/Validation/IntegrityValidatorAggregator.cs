@@ -1,5 +1,11 @@
 using System.Runtime.CompilerServices;
 using Snap2HTML.Core.Models;
+using Snap2HTML.Services.Validation.Archive;
+using Snap2HTML.Services.Validation.Audio;
+using Snap2HTML.Services.Validation.Document;
+using Snap2HTML.Services.Validation.Image;
+using Snap2HTML.Services.Validation.Pdf;
+using Snap2HTML.Services.Validation.Video;
 
 namespace Snap2HTML.Services.Validation;
 
@@ -13,6 +19,17 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
     private readonly IFileIntegrityValidator[] _validators;
 
     /// <summary>
+    /// Creates a default aggregator with all built-in validators.
+    /// </summary>
+    public static IntegrityValidatorAggregator CreateDefault() => new(
+        new ImageIntegrityValidator(),
+        new PdfIntegrityValidator(),
+        new VideoIntegrityValidator(),
+        new AudioIntegrityValidator(),
+        new ArchiveIntegrityValidator(),
+        new DocumentIntegrityValidator());
+
+    /// <summary>
     /// Creates a new aggregator with the specified validators.
     /// Validators are checked in order; the first one that supports a file's extension handles it.
     /// </summary>
@@ -20,6 +37,24 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
     public IntegrityValidatorAggregator(params IFileIntegrityValidator[] validators)
     {
         _validators = validators;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<FormatSupportInfo> GetSupportedFormats()
+    {
+        var formats = new List<FormatSupportInfo>();
+        foreach (var validator in _validators)
+        {
+            foreach (var ext in validator.SupportedExtensions.Order(StringComparer.OrdinalIgnoreCase))
+            {
+                formats.Add(new FormatSupportInfo(
+                    validator.CategoryName,
+                    ext.TrimStart('.'),
+                    SupportsHeaderValidation: true,
+                    validator.SupportsFullValidation));
+            }
+        }
+        return formats;
     }
 
     /// <inheritdoc />

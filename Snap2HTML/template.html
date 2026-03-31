@@ -1067,7 +1067,7 @@
 							for( var c2=1; c2< arrLength-2; c2++ )
 							{
 								SearchFilenames[nFound] = dirs[c][c2].split("*");
-								SearchFilenames[nFound][3] = SearchFilenames[nFound][0];		// keep original name (in non-lowercase)
+								SearchFilenames[nFound][5] = SearchFilenames[nFound][0];		// keep original name (in non-lowercase)
 								SearchFilenames[nFound][0] = SearchFilenames[nFound][0].toLowerCase();
 								SearchFilenames[nFound][1] = Number(SearchFilenames[nFound][1]);
 								SearchLocationsRaw[nFound] = getDirNameAndPath(c);
@@ -1150,7 +1150,7 @@
 									"<td><span class='file_folder'><a href=\"#\" class=\"folder_link\" id=\"" + SearchLocationsID[index] + "\"> " + SearchFilenames[index][3] + "</a></span></td>" + 
 									locationHtml + 
 									"<td class='size' data-sort='" + SearchFilenames[index][1] + "'>" + bytesToSize( SearchFilenames[index][1] ) + "</td>" + 
-									"<td class='date' data-sort='" + SearchFilenames[index][2] + "'>" + timestamp + "</td>" + "<td class='hash'>" + (SearchFilenames[index][4] || "") + "</td>" + "<td class='integrity'></td>" +
+									"<td class='date' data-sort='" + SearchFilenames[index][2] + "'>" + timestamp + "</td>" + "<td class='hash'></td>" + "<td class='integrity'></td>" +
 								"</tr>";
 							currentView.push( { "name": SearchFilenames[index][3], "path": SearchLocationsRaw[index].replace(/\//g,"\\"), "type": "dir", "size": SearchFilenames[index][1], "date": SearchFilenames[index][2] } );
 						}
@@ -1159,14 +1159,14 @@
 							sizeFiles += SearchFilenames[index][1];
 							countFiles++;
 
-							var file_tmp = SearchFilenames[index][3];
+							var file_tmp = SearchFilenames[index][5];
 
 							if( linkFiles )
 							{
 								var ext = file_tmp.split('.').pop();
 								if(onlyLinkExtensions.length === 0 || onlyLinkExtensions.indexOf(ext) !== -1) {
 
-									file_tmp = linkProtocol + linkRoot + dir_tmp.replace("\\","/") + SearchFilenames[index][3] + "\">";
+									file_tmp = linkProtocol + linkRoot + dir_tmp.replace("\\","/") + SearchFilenames[index][5] + "\">";
 									if( navigator.userAgent.toLowerCase().indexOf("msie") !== -1  &&  linkProtocol.indexOf("file:") !== -1 )
 									{
 										file_tmp = "javascript:alert('Internet Explorer does not allow linking to local files...')" + "\">";
@@ -1188,29 +1188,29 @@
 										file_tmp = file_tmp.replace(/\/\//g,"/");
 									}
 
-									file_tmp = "<a href=\"" + file_tmp + SearchFilenames[index][3] + "</a>";
+file_tmp = "<a href=\"" + file_tmp + SearchFilenames[index][5] + "</a>";
+									}
 								}
-							}
 
-							locationHtml = "";
-							if(showLocationColumn) {
-								var located_in = SearchLocations[index];
-								if( located_in === "" ) located_in = "[.]"
-								locationHtml = "<td><span class='file_folder'><a href=\"#\" class=\"folder_link\" id=\"" + SearchLocationsID[index] + "\"> " + located_in + "</a></span></td>";
-							}
+								locationHtml = "";
+								if(showLocationColumn) {
+									var located_in = SearchLocations[index];
+									if( located_in === "" ) located_in = "[.]"
+									locationHtml = "<td><span class='file_folder'><a href=\"#\" class=\"folder_link\" id=\"" + SearchLocationsID[index] + "\"> " + located_in + "</a></span></td>";
+								}
 
 
-							var timestamp = timestampToDate(SearchFilenames[index][2]);
-							var integrityHtml = integrityStatusToHtml(SearchFilenames[index][5] || "0");
-							table_html += 
-								"<tr>" + 
-									"<td><span class='file'>" + file_tmp + "</span></td>" + 
-									locationHtml + 
-									"<td class='size' data-sort='" + SearchFilenames[index][1] + "'>" + bytesToSize( SearchFilenames[index][1] ) + "</td>" + 
-									"<td class='date' data-sort='" + SearchFilenames[index][2] + "'>" + timestamp + "</td>" + "<td class='hash'>" + (SearchFilenames[index][4] || "") + "</td>" + "<td class='integrity'>" + integrityHtml + "</td>" +
-								"</tr>";
+								var timestamp = timestampToDate(SearchFilenames[index][2]);
+								var integrityHtml = integrityStatusToHtml(SearchFilenames[index][4] || "0");
+								table_html += 
+									"<tr>" + 
+										"<td><span class='file'>" + file_tmp + "</span></td>" + 
+										locationHtml + 
+										"<td class='size' data-sort='" + SearchFilenames[index][1] + "'>" + bytesToSize( SearchFilenames[index][1] ) + "</td>" + 
+										"<td class='date' data-sort='" + SearchFilenames[index][2] + "'>" + timestamp + "</td>" + "<td class='hash'>" + (SearchFilenames[index][3] || "") + "</td>" + "<td class='integrity'>" + integrityHtml + "</td>" +
+									"</tr>";
 
-							currentView.push( { "name": SearchFilenames[index][3], "path": SearchLocationsRaw[index].replace(/\//g,"\\"), "type": "file", "size": SearchFilenames[index][1], "date": SearchFilenames[index][2], "hash": SearchFilenames[index][4] || "", "integrity": SearchFilenames[index][5] || "0" } );
+								currentView.push( { "name": SearchFilenames[index][5], "path": SearchLocationsRaw[index].replace(/\//g,"\\"), "type": "file", "size": SearchFilenames[index][1], "date": SearchFilenames[index][2], "hash": SearchFilenames[index][3] || "", "integrity": SearchFilenames[index][4] || "0" } );
 
 						}
 					}

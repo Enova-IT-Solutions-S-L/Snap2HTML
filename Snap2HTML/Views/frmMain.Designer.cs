@@ -45,6 +45,7 @@
 			this.chkEnableHash = new System.Windows.Forms.CheckBox();
 			this.lblIntegrityLevel = new System.Windows.Forms.Label();
 			this.cmbIntegrityLevel = new System.Windows.Forms.ComboBox();
+			this.lnkSupportedFormats = new System.Windows.Forms.LinkLabel();
 			this.cmdCreate = new System.Windows.Forms.Button();
 			this.txtRoot = new System.Windows.Forms.TextBox();
 			this.labelRootFolder = new System.Windows.Forms.Label();
@@ -129,6 +130,7 @@
 			this.tabPage1.Controls.Add(this.chkEnableHash);
 			this.tabPage1.Controls.Add(this.lblIntegrityLevel);
 			this.tabPage1.Controls.Add(this.cmbIntegrityLevel);
+			this.tabPage1.Controls.Add(this.lnkSupportedFormats);
 			this.tabPage1.Controls.Add(this.cmdCreate);
 			this.tabPage1.Controls.Add(this.txtRoot);
 			this.tabPage1.Controls.Add(this.labelRootFolder);
@@ -263,11 +265,24 @@
             "None",
             "Header Only",
             "Full Validation"});
-			this.cmbIntegrityLevel.Location = new System.Drawing.Point(240, 76);
+			this.cmbIntegrityLevel.Location = new System.Drawing.Point(230, 76);
 			this.cmbIntegrityLevel.Name = "cmbIntegrityLevel";
-			this.cmbIntegrityLevel.Size = new System.Drawing.Size(100, 21);
+			this.cmbIntegrityLevel.Size = new System.Drawing.Size(90, 21);
 			this.cmbIntegrityLevel.TabIndex = 21;
-			this.toolTip1.SetToolTip(this.cmbIntegrityLevel, "Validate file integrity for supported formats (images, PDFs).\nNone = disabled\nHeader Only = fast magic bytes check\nFull Validation = thorough format-specific validation");
+			this.toolTip1.SetToolTip(this.cmbIntegrityLevel, "Validate file integrity for supported formats.\nNone = disabled\nHeader Only = fast magic bytes check\nFull Validation = thorough format-specific validation");
+			// 
+			// lnkSupportedFormats
+			// 
+			this.lnkSupportedFormats.AutoSize = true;
+			this.lnkSupportedFormats.LinkBehavior = System.Windows.Forms.LinkBehavior.HoverUnderline;
+			this.lnkSupportedFormats.LinkColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(0)))), ((int)(((byte)(192)))));
+			this.lnkSupportedFormats.Location = new System.Drawing.Point(230, 98);
+			this.lnkSupportedFormats.Name = "lnkSupportedFormats";
+			this.lnkSupportedFormats.Size = new System.Drawing.Size(90, 13);
+			this.lnkSupportedFormats.TabIndex = 22;
+			this.lnkSupportedFormats.TabStop = true;
+			this.lnkSupportedFormats.Text = "Supported formats";
+			this.lnkSupportedFormats.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.lnkSupportedFormats_LinkClicked);
 			// 
 			// cmdCreate
 			// 
@@ -650,6 +665,7 @@
         private System.Windows.Forms.CheckBox chkEnableHash;
         private System.Windows.Forms.Label lblIntegrityLevel;
         private System.Windows.Forms.ComboBox cmbIntegrityLevel;
+        private System.Windows.Forms.LinkLabel lnkSupportedFormats;
 		private System.Windows.Forms.Label label2;
 		private System.Windows.Forms.TextBox txtTitle;
 		private System.Windows.Forms.ToolTip toolTip1;

@@ -57,6 +57,9 @@ public class ArchiveIntegrityValidator : FileIntegrityValidatorBase, IArchiveInt
     private static readonly byte[] Iso9660Signature = { 0x43, 0x44, 0x30, 0x30, 0x31 }; // "CD001"
 
     /// <inheritdoc />
+    public override string CategoryName => "Archives";
+
+    /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => ArchiveExtensions;
 
     /// <summary>

@@ -68,6 +68,9 @@ public class DocumentIntegrityValidator : FileIntegrityValidatorBase, IDocumentI
         { 0x7B, 0x5C, 0x72, 0x74, 0x66 };
 
     /// <inheritdoc />
+    public override string CategoryName => "Documents";
+
+    /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => DocumentExtensions;
 
     /// <inheritdoc />
