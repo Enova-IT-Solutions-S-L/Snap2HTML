@@ -29,7 +29,8 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
         new AudioIntegrityValidator(),
         new ArchiveIntegrityValidator(),
         new DocumentIntegrityValidator(),
-        new DatabaseIntegrityValidator());
+        new DatabaseIntegrityValidator(),
+        new SqlServerIntegrityValidator());
 
     /// <summary>
     /// Creates a new aggregator with the specified validators.

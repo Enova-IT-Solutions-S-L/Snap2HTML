@@ -6,6 +6,10 @@ namespace Snap2HTML.Services.Validation.Database;
 /// SQLite database integrity validator.
 /// Inherits Channel-based batch pipeline from <see cref="FileIntegrityValidatorBase"/>.
 /// Currently implements magic bytes validation only.
+///
+/// Supported extensions: .sqlite, .sqlite3, .db, .db3, .s3db, .sl3
+/// Signature: "SQLite format 3\0" (16 bytes at offset 0)
+/// See: https://www.sqlite.org/fileformat.html#the_header_string
 /// </summary>
 public class DatabaseIntegrityValidator : FileIntegrityValidatorBase, IDatabaseIntegrityValidator
 {
@@ -16,8 +20,6 @@ public class DatabaseIntegrityValidator : FileIntegrityValidatorBase, IDatabaseI
 
     /// <summary>
     /// SQLite magic bytes: "SQLite format 3\0" — 16 bytes at offset 0.
-    /// Every valid SQLite database file starts with this exact header string.
-    /// See: https://www.sqlite.org/fileformat.html#the_header_string
     /// </summary>
     private static readonly byte[] SqliteSignature =
     {
@@ -26,7 +28,7 @@ public class DatabaseIntegrityValidator : FileIntegrityValidatorBase, IDatabaseI
     };
 
     /// <inheritdoc />
-    public override string CategoryName => "Database";
+    public override string CategoryName => "SQLite";
 
     /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => DatabaseExtensions;
@@ -44,9 +46,7 @@ public class DatabaseIntegrityValidator : FileIntegrityValidatorBase, IDatabaseI
         for (var i = 0; i < SqliteSignature.Length; i++)
         {
             if (header[i] != SqliteSignature[i])
-            {
                 return false;
-            }
         }
 
         return true;
@@ -54,10 +54,8 @@ public class DatabaseIntegrityValidator : FileIntegrityValidatorBase, IDatabaseI
 
     /// <inheritdoc />
     /// <remarks>
-    /// TODO: Implement full SQLite validation using PRAGMA integrity_check or a library.
+    /// TODO: Implement full SQLite validation using PRAGMA integrity_check.
     /// Candidates: Microsoft.Data.Sqlite (MIT), System.Data.SQLite.
-    /// When implemented, open the database and run PRAGMA integrity_check to verify
-    /// structural consistency of the B-tree pages and index entries.
     /// </remarks>
     protected override ValueTask<IntegrityStatus> ValidateFullAsync(string filePath, CancellationToken ct)
     {
