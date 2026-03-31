@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Threading.Channels;
@@ -48,7 +49,6 @@ public class FolderScanner : IFolderScanner
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            var folders = new Dictionary<string, SnappedFolder>();
 
             // Collect all directories first (single pass with enumeration)
             var dirs = await CollectDirectoriesAsync(
@@ -69,6 +69,9 @@ public class FolderScanner : IFolderScanner
             // Process directories
             stopwatch.Restart();
 
+            // Use ConcurrentDictionary for lock-free parallel writes
+            var folders = new ConcurrentDictionary<string, SnappedFolder>();
+
             // Use parallel processing for large directory sets
             int totFiles;
             if (dirs.Count > 10)
@@ -79,7 +82,7 @@ public class FolderScanner : IFolderScanner
             else
             {
                 // Sequential processing for small sets
-                totFiles = ProcessDirectoriesSequential(
+                totFiles = await ProcessDirectoriesSequentialAsync(
                     dirs, folders, options, stopwatch, progress, cancellationToken);
             }
 
@@ -193,13 +196,12 @@ public class FolderScanner : IFolderScanner
 
     private async Task<int> ProcessDirectoriesParallelAsync(
         List<string> dirs,
-        Dictionary<string, SnappedFolder> folders,
+        ConcurrentDictionary<string, SnappedFolder> folders,
         ScanOptions options,
         Stopwatch stopwatch,
         IProgress<ScanProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var lockObj = new object();
         var localTotFiles = 0;
 
         var parallelOptions = new ParallelOptions
@@ -211,32 +213,29 @@ public class FolderScanner : IFolderScanner
         await Parallel.ForEachAsync(dirs, parallelOptions, async (dirName, ct) =>
         {
             var folder = await ProcessDirectoryAsync(dirName, options, ct);
-            
-            lock (lockObj)
-            {
-                folders[dirName] = folder;
-                localTotFiles += folder.Files.Count;
 
-                if (stopwatch.ElapsedMilliseconds >= 50)
+            folders[dirName] = folder;
+            var newTotal = Interlocked.Add(ref localTotFiles, folder.Files.Count);
+
+            if (stopwatch.ElapsedMilliseconds >= 50)
+            {
+                progress?.Report(new ScanProgress
                 {
-                    progress?.Report(new ScanProgress
-                    {
-                        StatusMessage = $"Reading files... {localTotFiles}",
-                        FilesProcessed = localTotFiles,
-                        FoldersProcessed = folders.Count,
-                        CurrentItem = dirName
-                    });
-                    stopwatch.Restart();
-                }
+                    StatusMessage = $"Reading files... {newTotal}",
+                    FilesProcessed = newTotal,
+                    FoldersProcessed = folders.Count,
+                    CurrentItem = dirName
+                });
+                stopwatch.Restart();
             }
         });
 
         return localTotFiles;
     }
 
-    private int ProcessDirectoriesSequential(
+    private async Task<int> ProcessDirectoriesSequentialAsync(
         List<string> dirs,
-        Dictionary<string, SnappedFolder> folders,
+        ConcurrentDictionary<string, SnappedFolder> folders,
         ScanOptions options,
         Stopwatch stopwatch,
         IProgress<ScanProgress>? progress,
@@ -248,7 +247,7 @@ public class FolderScanner : IFolderScanner
         {
             if (cancellationToken.IsCancellationRequested) break;
 
-            var folder = ProcessDirectorySync(dirName, options);
+            var folder = await ProcessDirectoryAsync(dirName, options, cancellationToken);
             folders[dirName] = folder;
             totFiles += folder.Files.Count;
 
@@ -270,15 +269,10 @@ public class FolderScanner : IFolderScanner
 
     private async Task<SnappedFolder> ProcessDirectoryAsync(string dirName, ScanOptions options, CancellationToken ct)
     {
-        return await Task.Run(() => ProcessDirectorySync(dirName, options), ct);
-    }
-
-    private SnappedFolder ProcessDirectorySync(string dirName, ScanOptions options)
-    {
         var folder = CreateSnappedFolder(dirName);
         SetFolderMetadata(folder, dirName);
-        
-        var files = GetFilesInFolder(dirName, options);
+
+        var files = await GetFilesInFolderAsync(dirName, options, ct);
         foreach (var file in files)
         {
             folder.Files.Add(file);
@@ -312,7 +306,7 @@ public class FolderScanner : IFolderScanner
         }
     }
 
-    private List<SnappedFile> GetFilesInFolder(string dirName, ScanOptions options)
+    private async Task<List<SnappedFile>> GetFilesInFolderAsync(string dirName, ScanOptions options, CancellationToken ct)
     {
         var result = new List<SnappedFile>();
 
@@ -321,7 +315,7 @@ public class FolderScanner : IFolderScanner
             // Use EnumerateFiles for lazy enumeration (memory efficient)
             foreach (var filePath in Directory.EnumerateFiles(dirName))
             {
-                var snappedFile = CreateSnappedFile(filePath, options);
+                var snappedFile = await CreateSnappedFileAsync(filePath, options, ct);
                 if (snappedFile.HasValue)
                 {
                     result.Add(snappedFile.Value);
@@ -342,7 +336,7 @@ public class FolderScanner : IFolderScanner
         return result;
     }
 
-    private SnappedFile? CreateSnappedFile(string filePath, ScanOptions options)
+    private async ValueTask<SnappedFile?> CreateSnappedFileAsync(string filePath, ScanOptions options, CancellationToken ct)
     {
         try
         {
@@ -358,18 +352,18 @@ public class FolderScanner : IFolderScanner
             var modifiedTimestamp = StringUtils.ToUnixTimestamp(fi.LastWriteTime.ToLocalTime());
             var createdTimestamp = StringUtils.ToUnixTimestamp(fi.CreationTime.ToLocalTime());
 
-            // Compute hash if enabled
+            // Compute hash if enabled — opens file once for SHA256
             var hash = string.Empty;
             if (options.EnableHashing)
             {
                 hash = ComputeFileHash(filePath);
             }
 
-            // Validate image integrity if enabled
+            // Validate integrity if enabled — truly async, no thread blocking
             var integrityStatus = IntegrityStatus.Unknown;
             if (options.IntegrityLevel != IntegrityValidationLevel.None)
             {
-                integrityStatus = ValidateIntegrity(filePath, options.IntegrityLevel);
+                integrityStatus = await ValidateIntegrityAsync(filePath, options.IntegrityLevel, ct);
             }
 
             return new SnappedFile(
@@ -388,18 +382,16 @@ public class FolderScanner : IFolderScanner
     }
 
     /// <summary>
-    /// Validates file integrity synchronously.
-    /// Note: This uses blocking wait on an async operation because the validation is fast (mostly I/O)
-    /// and making the entire CreateSnappedFile/ProcessDirectory chain async would require significant
-    /// architectural changes. For large directory scans, the parallel processing approach already
-    /// provides good throughput.
+    /// Validates file integrity asynchronously without blocking thread pool threads.
     /// </summary>
-    private IntegrityStatus ValidateIntegrity(string filePath, IntegrityValidationLevel level)
+    private async ValueTask<IntegrityStatus> ValidateIntegrityAsync(
+        string filePath,
+        IntegrityValidationLevel level,
+        CancellationToken ct)
     {
         try
         {
-            return _integrityValidator.ValidateAsync(filePath, level, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            return await _integrityValidator.ValidateAsync(filePath, level, ct);
         }
         catch (Exception ex)
         {

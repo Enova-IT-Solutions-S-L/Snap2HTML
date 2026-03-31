@@ -9,24 +9,52 @@ namespace Snap2HTML.Core.Utilities;
 public static class StringUtils
 {
     /// <summary>
+    /// Comparer that sorts directory paths treating spaces and periods
+    /// as lower-priority characters, matching the legacy sort behavior
+    /// without allocating intermediate strings.
+    /// </summary>
+    private sealed class DirectoryPathComparer : IComparer<string>
+    {
+        public static readonly DirectoryPathComparer Instance = new();
+
+        public int Compare(string? x, string? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null) return -1;
+            if (y is null) return 1;
+
+            var len = Math.Min(x.Length, y.Length);
+            for (var i = 0; i < len; i++)
+            {
+                var cx = MapChar(x[i]);
+                var cy = MapChar(y[i]);
+                var cmp = cx.CompareTo(cy);
+                if (cmp != 0) return cmp;
+            }
+
+            return x.Length.CompareTo(y.Length);
+        }
+
+        /// <summary>
+        /// Maps characters to sort order consistent with the legacy Replace approach:
+        /// space → "1|1" and period → "2|2". This places space before period,
+        /// and both before other printable characters.
+        /// </summary>
+        private static string MapChar(char c) => c switch
+        {
+            ' ' => "1|1",
+            '.' => "2|2",
+            _ => c.ToString()
+        };
+    }
+
+    /// <summary>
     /// Sorts a list of directories correctly even if they have spaces/periods in them.
+    /// Uses a custom comparer to avoid intermediate string allocations.
     /// </summary>
     public static List<string> SortDirList(List<string> lstDirs)
     {
-        for (var n = 0; n < lstDirs.Count; n++)
-        {
-            lstDirs[n] = lstDirs[n].Replace(" ", "1|1");
-            lstDirs[n] = lstDirs[n].Replace(".", "2|2");
-        }
-
-        lstDirs.Sort();
-
-        for (var n = 0; n < lstDirs.Count; n++)
-        {
-            lstDirs[n] = lstDirs[n].Replace("1|1", " ");
-            lstDirs[n] = lstDirs[n].Replace("2|2", ".");
-        }
-
+        lstDirs.Sort(DirectoryPathComparer.Instance);
         return lstDirs;
     }
 
