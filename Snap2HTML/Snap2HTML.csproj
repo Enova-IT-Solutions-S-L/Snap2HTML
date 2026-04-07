@@ -33,6 +33,7 @@
     <PackageReference Include="PdfPig" Version="0.1.14" />
     <PackageReference Include="z440.atl.core" Version="7.11.0" />
     <PackageReference Include="SharpCompress" Version="0.47.3" />
+    <PackageReference Include="OpenMcdf" Version="3.1.2" />
   </ItemGroup>
 
 </Project>
