@@ -99,6 +99,21 @@ public class ScanResult
     /// Total size of all files in bytes.
     /// </summary>
     public long TotalSize { get; set; }
+
+    /// <summary>
+    /// Number of files that were checked for integrity (Valid + InvalidMagicBytes + DecodingFailed).
+    /// </summary>
+    public int IntegrityCheckedCount { get; set; }
+
+    /// <summary>
+    /// Number of files that passed integrity validation.
+    /// </summary>
+    public int IntegrityValidCount { get; set; }
+
+    /// <summary>
+    /// Number of files that failed integrity validation (InvalidMagicBytes + DecodingFailed).
+    /// </summary>
+    public int IntegrityCorruptCount { get; set; }
 }
 
 /// <summary>

@@ -130,8 +130,8 @@ public class HtmlGenerator : IHtmlGenerator
         HtmlGenerationOptions options)
     {
         sbTemplate.Replace("[TITLE]", options.Title);
-        sbTemplate.Replace("[APP LINK]", "http://www.rlvision.com");
-        sbTemplate.Replace("[APP NAME]", options.AppName);
+        sbTemplate.Replace("[APP LINK]", "http://www.lazarus.es");
+        sbTemplate.Replace("[APP NAME]", "Lazarus Technology"); // Replace [APP_NAME] with actual app name
 
         var versionParts = options.AppVersion.Split('.');
         var displayVersion = versionParts.Length >= 2
@@ -144,6 +144,17 @@ public class HtmlGenerator : IHtmlGenerator
         sbTemplate.Replace("[NUM FILES]", scanResult.TotalFiles.ToString());
         sbTemplate.Replace("[NUM DIRS]", scanResult.TotalDirectories.ToString());
         sbTemplate.Replace("[TOT SIZE]", scanResult.TotalSize.ToString());
+
+        // Integrity statistics
+        sbTemplate.Replace("[INTEGRITY_CHECKED]", scanResult.IntegrityCheckedCount.ToString());
+        sbTemplate.Replace("[INTEGRITY_VALID]", scanResult.IntegrityValidCount.ToString());
+        sbTemplate.Replace("[INTEGRITY_CORRUPT]", scanResult.IntegrityCorruptCount.ToString());
+
+        var integrityPercent = scanResult.IntegrityCheckedCount > 0
+            ? Math.Round((double)scanResult.IntegrityCorruptCount / scanResult.IntegrityCheckedCount * 100, 1)
+            : 0;
+        sbTemplate.Replace("[INTEGRITY_PERCENT]", integrityPercent.ToString());
+        sbTemplate.Replace("[INTEGRITY_DISPLAY]", scanResult.IntegrityCheckedCount > 0 ? "" : "display:none");
 
         if (options.LinkFiles)
         {

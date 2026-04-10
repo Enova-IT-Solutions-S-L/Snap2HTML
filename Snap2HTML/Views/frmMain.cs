@@ -332,7 +332,7 @@ public partial class frmMain : Form, IMainFormView
 
         _ = await _presenter.CreateSnapshotAsync(
             settings,
-            Application.ProductName ?? "Snap2HTML",
+            Application.ProductName ?? "Lazarus Technology",
             Application.ProductVersion ?? "1.0.0");
 
         // Quit when finished if automated via command line

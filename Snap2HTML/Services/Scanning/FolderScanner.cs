@@ -410,6 +410,9 @@ public class FolderScanner : IFolderScanner
         result.TotalDirectories = result.Folders.Count;
         result.TotalFiles = 0;
         result.TotalSize = 0;
+        result.IntegrityCheckedCount = 0;
+        result.IntegrityValidCount = 0;
+        result.IntegrityCorruptCount = 0;
 
         foreach (var folder in result.Folders)
         {
@@ -417,6 +420,19 @@ public class FolderScanner : IFolderScanner
             {
                 result.TotalFiles++;
                 result.TotalSize += file.Size;
+
+                switch (file.IntegrityStatus)
+                {
+                    case IntegrityStatus.Valid:
+                        result.IntegrityCheckedCount++;
+                        result.IntegrityValidCount++;
+                        break;
+                    case IntegrityStatus.InvalidMagicBytes:
+                    case IntegrityStatus.DecodingFailed:
+                        result.IntegrityCheckedCount++;
+                        result.IntegrityCorruptCount++;
+                        break;
+                }
             }
         }
     }
