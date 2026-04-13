@@ -4,49 +4,48 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag (e.g. v3.0.0)'
-        required: true
-        default: 'v3.0.0'
-      create_release:
-        description: 'Create GitHub Release?'
-        required: true
-        type: boolean
-        default: false
-      self_contained:
-        description: 'Self-contained (no .NET runtime needed)?'
-        required: true
-        type: boolean
-        default: true
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-release:
     runs-on: windows-latest
-
-    env:
-      VERSION: ${{ inputs.version || 'latest' }}
-      SELF_CONTAINED: ${{ inputs.self_contained == '' && 'true' || inputs.self_contained }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Determine version from csproj (auto mode)
-        if: ${{ env.VERSION == 'latest' }}
+      - name: Determine version from csproj
+        id: version
         shell: pwsh
         run: |
           [xml]$proj = Get-Content Snap2HTML/Snap2HTML.csproj
           $ver = $proj.Project.PropertyGroup.Version
-          echo "VERSION=v$ver" >> $env:GITHUB_ENV
+          echo "VERSION=v$ver" >> $env:GITHUB_OUTPUT
+          echo "VERSION_RAW=$ver" >> $env:GITHUB_OUTPUT
+          echo "Detected version: v$ver"
+
+      - name: Check if tag already exists
+        id: tag_check
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.VERSION }}"
+          $exists = git tag -l $tag
+          if ($exists) {
+            echo "TAG_EXISTS=true" >> $env:GITHUB_OUTPUT
+            echo "Tag $tag already exists, skipping release"
+          } else {
+            echo "TAG_EXISTS=false" >> $env:GITHUB_OUTPUT
+            echo "Tag $tag does not exist, will create release"
+          }
 
       - name: Restore dependencies
         run: dotnet restore Snap2HTML.sln
@@ -57,41 +56,108 @@ jobs:
       - name: Publish
         run: |
           dotnet publish Snap2HTML/Snap2HTML.csproj -c Release -r win-x64 `
-            --self-contained ${{ env.SELF_CONTAINED }} `
+            --self-contained true `
             -p:PublishSingleFile=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:EnableCompressionInSingleFile=true `
             -o ./publish
 
-      - name: List publish output
-        run: Get-ChildItem ./publish -Recurse | Select-Object FullName, Length
+      - name: Verify output exists
+        run: |
+          if (-not (Test-Path ./publish/Snap2HTML.exe)) {
+            Write-Error "Snap2HTML.exe not found in publish output"
+            exit 1
+          }
+          $size = (Get-Item ./publish/Snap2HTML.exe).Length
+          Write-Host "Snap2HTML.exe size: $([math]::Round($size / 1MB, 2)) MB"
 
       - name: Create ZIP artifact
-        run: Compress-Archive -Path ./publish/* -DestinationPath ./Snap2HTML-${{ env.VERSION }}-win-x64.zip
+        run: Compress-Archive -Path ./publish/* -DestinationPath ./Snap2HTML-${{ steps.version.outputs.VERSION }}-win-x64.zip
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Snap2HTML-${{ env.VERSION }}-win-x64
-          path: ./Snap2HTML-${{ env.VERSION }}-win-x64.zip
+          name: Snap2HTML-${{ steps.version.outputs.VERSION }}-win-x64
+          path: ./Snap2HTML-${{ steps.version.outputs.VERSION }}-win-x64.zip
           retention-days: 90
 
+      - name: Generate release notes
+        if: steps.tag_check.outputs.TAG_EXISTS == 'false'
+        id: changelog
+        shell: bash
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%s|%h" --no-merges)
+          else
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"%s|%h" --no-merges)
+          fi
+
+          # Categorize commits using conventional commits
+          FEATURES=""
+          FIXES=""
+          PERF=""
+          REFACTOR=""
+          DOCS=""
+          CHORE=""
+          OTHER=""
+
+          while IFS='|' read -r msg hash; do
+            [ -z "$msg" ] && continue
+            # Skip merge commits
+            echo "$msg" | grep -qi "^Merge" && continue
+
+            if echo "$msg" | grep -qiE "^feat(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^feat(\([^)]*\))?:\s*//')
+              FEATURES="${FEATURES}- ${desc} (\`${hash}\`)\n"
+            elif echo "$msg" | grep -qiE "^fix(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^fix(\([^)]*\))?:\s*//')
+              FIXES="${FIXES}- ${desc} (\`${hash}\`)\n"
+            elif echo "$msg" | grep -qiE "^perf(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^perf(\([^)]*\))?:\s*//')
+              PERF="${PERF}- ${desc} (\`${hash}\`)\n"
+            elif echo "$msg" | grep -qiE "^refactor(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^refactor(\([^)]*\))?:\s*//')
+              REFACTOR="${REFACTOR}- ${desc} (\`${hash}\`)\n"
+            elif echo "$msg" | grep -qiE "^docs(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^docs(\([^)]*\))?:\s*//')
+              DOCS="${DOCS}- ${desc} (\`${hash}\`)\n"
+            elif echo "$msg" | grep -qiE "^(chore|ci|build|style|test)(\(.+\))?:"; then
+              desc=$(echo "$msg" | sed -E 's/^(chore|ci|build|style|test)(\([^)]*\))?:\s*//')
+              CHORE="${CHORE}- ${desc} (\`${hash}\`)\n"
+            else
+              OTHER="${OTHER}- ${msg} (\`${hash}\`)\n"
+            fi
+          done <<< "$COMMITS"
+
+          # Build release notes
+          NOTES="## Snap2HTML ${VERSION}\n\n"
+
+          [ -n "$FEATURES" ] && NOTES="${NOTES}### 🚀 Features\n${FEATURES}\n"
+          [ -n "$FIXES" ] && NOTES="${NOTES}### 🐛 Bug Fixes\n${FIXES}\n"
+          [ -n "$PERF" ] && NOTES="${NOTES}### ⚡ Performance\n${PERF}\n"
+          [ -n "$REFACTOR" ] && NOTES="${NOTES}### ♻️ Refactoring\n${REFACTOR}\n"
+          [ -n "$DOCS" ] && NOTES="${NOTES}### 📝 Documentation\n${DOCS}\n"
+          [ -n "$CHORE" ] && NOTES="${NOTES}### 🔧 Maintenance\n${CHORE}\n"
+          [ -n "$OTHER" ] && NOTES="${NOTES}### 📦 Other Changes\n${OTHER}\n"
+
+          NOTES="${NOTES}### Download\n- **Snap2HTML-${VERSION}-win-x64.zip** — Single-file executable for Windows x64\n"
+
+          # Write to file (multi-line safe)
+          echo -e "$NOTES" > release_notes.md
+          cat release_notes.md
+
       - name: Create GitHub Release
-        if: ${{ inputs.create_release }}
+        if: steps.tag_check.outputs.TAG_EXISTS == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.VERSION }}
-          name: Snap2HTML ${{ env.VERSION }}
-          body: |
-            ## Snap2HTML ${{ env.VERSION }}
-
-            ### Download
-            - **Snap2HTML-${{ env.VERSION }}-win-x64.zip** — Single-file executable for Windows x64
-
-            ### What's included
-            - `Snap2HTML.exe` — Main application
-            - `template.html` — HTML report template
-            - `ReadMe.txt` — Documentation
-          files: ./Snap2HTML-${{ env.VERSION }}-win-x64.zip
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: Snap2HTML ${{ steps.version.outputs.VERSION }}
+          body_path: release_notes.md
+          files: ./Snap2HTML-${{ steps.version.outputs.VERSION }}-win-x64.zip
           draft: false
           prerelease: false
+          generate_release_notes: false
