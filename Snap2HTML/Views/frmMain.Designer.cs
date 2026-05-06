@@ -34,6 +34,8 @@
 			this.toolStripStatusLabel1 = new System.Windows.Forms.ToolStripStatusLabel();
 			this.tabControl1 = new System.Windows.Forms.TabControl();
 			this.tabPage1 = new System.Windows.Forms.TabPage();
+			this.tabPagePrerequisites = new System.Windows.Forms.TabPage();
+			this.pnlPrerequisites = new System.Windows.Forms.Panel();
 			this.label2 = new System.Windows.Forms.Label();
 			this.txtTitle = new System.Windows.Forms.TextBox();
 			this.label6 = new System.Windows.Forms.Label();
@@ -79,6 +81,7 @@
 			this.statusStrip1.SuspendLayout();
 			this.tabControl1.SuspendLayout();
 			this.tabPage1.SuspendLayout();
+			this.tabPagePrerequisites.SuspendLayout();
 			this.tabPage3.SuspendLayout();
 			((System.ComponentModel.ISupportInitialize)(this.pictureBox4)).BeginInit();
 			this.tabPage2.SuspendLayout();
@@ -109,6 +112,7 @@
 			// tabControl1
 			// 
 			this.tabControl1.Controls.Add(this.tabPage1);
+			this.tabControl1.Controls.Add(this.tabPagePrerequisites);
 			this.tabControl1.Controls.Add(this.tabPage3);
 			this.tabControl1.Controls.Add(this.tabPage2);
 			this.tabControl1.Location = new System.Drawing.Point(8, 8);
@@ -116,6 +120,24 @@
 			this.tabControl1.SelectedIndex = 0;
 			this.tabControl1.Size = new System.Drawing.Size(338, 336);
 			this.tabControl1.TabIndex = 0;
+			// 
+			// tabPagePrerequisites
+			// 
+			this.tabPagePrerequisites.Location = new System.Drawing.Point(4, 22);
+			this.tabPagePrerequisites.Name = "tabPagePrerequisites";
+			this.tabPagePrerequisites.Padding = new System.Windows.Forms.Padding(3);
+			this.tabPagePrerequisites.Size = new System.Drawing.Size(330, 310);
+			this.tabPagePrerequisites.TabIndex = 3;
+			this.tabPagePrerequisites.Text = "Prerequisites";
+			this.tabPagePrerequisites.UseVisualStyleBackColor = true;
+			this.tabPagePrerequisites.Controls.Add(this.pnlPrerequisites);
+			// 
+			// pnlPrerequisites
+			// 
+			this.pnlPrerequisites.AutoScroll = true;
+			this.pnlPrerequisites.Dock = System.Windows.Forms.DockStyle.Fill;
+			this.pnlPrerequisites.Name = "pnlPrerequisites";
+			this.pnlPrerequisites.Padding = new System.Windows.Forms.Padding(6);
 			// 
 			// tabPage1
 			// 
@@ -623,6 +645,7 @@
 			this.tabControl1.ResumeLayout(false);
 			this.tabPage1.ResumeLayout(false);
 			this.tabPage1.PerformLayout();
+			this.tabPagePrerequisites.ResumeLayout(false);
 			this.tabPage3.ResumeLayout(false);
 			this.tabPage3.PerformLayout();
 			((System.ComponentModel.ISupportInitialize)(this.pictureBox4)).EndInit();
@@ -687,6 +710,8 @@
 		private System.Windows.Forms.LinkLabel linkLabel5;
 		private System.Windows.Forms.Label label8;
 		private System.Windows.Forms.PictureBox pictureBoxDonate;
+		private System.Windows.Forms.TabPage tabPagePrerequisites;
+		private System.Windows.Forms.Panel pnlPrerequisites;
     }
 }
 

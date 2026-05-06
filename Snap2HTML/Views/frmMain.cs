@@ -2,6 +2,8 @@ using System.Windows.Forms;
 using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
+using Snap2HTML.Infrastructure.Prerequisites;
+using Snap2HTML.Infrastructure.Prerequisites.SqlLocalDb;
 using Snap2HTML.Presenters;
 using Snap2HTML.Services.CommandLine;
 using Snap2HTML.Services.Generation;
@@ -15,6 +17,8 @@ public partial class frmMain : Form, IMainFormView
     private bool _initDone;
     private bool _runningAutomated;
     private MainFormPresenter? _presenter;
+    private IPrerequisiteManager? _prerequisiteManager;
+    private IntegrityValidatorAggregator? _validatorAggregator;
 
     public frmMain()
     {
@@ -34,10 +38,14 @@ public partial class frmMain : Form, IMainFormView
         var fileSystem = new FileSystemAbstraction();
         var applicationPath = Path.GetDirectoryName(Application.ExecutablePath) ?? string.Empty;
         var templateProvider = new TemplateProvider(fileSystem, applicationPath);
-        var folderScanner = new FolderScanner(fileSystem);
         var htmlGenerator = new HtmlGenerator(templateProvider, fileSystem);
 
-        _presenter = new MainFormPresenter(folderScanner, htmlGenerator, this);
+        var localDbPrerequisite = new SqlLocalDbPrerequisite();
+        _prerequisiteManager = new PrerequisiteManager(localDbPrerequisite);
+        _validatorAggregator = IntegrityValidatorAggregator.CreateDefault(_prerequisiteManager);
+        var folderScannerWithValidator = new FolderScanner(fileSystem, _validatorAggregator);
+
+        _presenter = new MainFormPresenter(folderScannerWithValidator, htmlGenerator, this);
     }
 
     #region IMainFormView Implementation
@@ -212,6 +220,22 @@ public partial class frmMain : Form, IMainFormView
         {
             StartProcessing(settings);
         }
+
+        // Run prerequisite checks in the background immediately after the form is shown
+        _ = RunPrerequisiteChecksAsync();
+    }
+
+    private async Task RunPrerequisiteChecksAsync()
+    {
+        if (_prerequisiteManager is null) return;
+
+        // Show "Checking..." in the tab before kicking off the async checks
+        PopulatePrerequisitesTab();
+
+        await _prerequisiteManager.CheckAllAsync();
+
+        // Refresh the tab with the real statuses
+        PopulatePrerequisitesTab();
     }
 
     private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
@@ -368,10 +392,151 @@ public partial class frmMain : Form, IMainFormView
 
     private void lnkSupportedFormats_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
-        var formats = IntegrityValidatorAggregator.CreateDefault().GetSupportedFormats();
+        var aggregator = _validatorAggregator
+            ?? (_prerequisiteManager is not null
+                ? IntegrityValidatorAggregator.CreateDefault(_prerequisiteManager)
+                : null);
+
+        if (aggregator is null) return;
+
+        var formats = aggregator.GetSupportedFormats();
         using var dialog = new frmSupportedFormats(formats);
         dialog.ShowDialog(this);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Prerequisites tab
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void PopulatePrerequisitesTab()
+    {
+        if (InvokeRequired)
+        {
+            Invoke(PopulatePrerequisitesTab);
+            return;
+        }
+
+        pnlPrerequisites.SuspendLayout();
+        pnlPrerequisites.Controls.Clear();
+
+        if (_prerequisiteManager is null)
+        {
+            pnlPrerequisites.ResumeLayout();
+            return;
+        }
+
+        var y = 6;
+        const int rowHeight = 64;
+        const int padding = 6;
+
+        foreach (var prerequisite in _prerequisiteManager.GetAll())
+        {
+            var row = new Panel
+            {
+                Left = padding,
+                Top = y,
+                Width = pnlPrerequisites.ClientSize.Width - padding * 2,
+                Height = rowHeight,
+                BorderStyle = BorderStyle.FixedSingle,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+            };
+
+            // Name label
+            var lblName = new Label
+            {
+                Text = prerequisite.Name,
+                Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold),
+                Left = 6,
+                Top = 6,
+                Width = 180,
+                AutoSize = false,
+            };
+            row.Controls.Add(lblName);
+
+            // Description label
+            var lblDesc = new Label
+            {
+                Text = prerequisite.Description,
+                Left = 6,
+                Top = 24,
+                Width = 200,
+                Height = 32,
+                AutoSize = false,
+            };
+            row.Controls.Add(lblDesc);
+
+            // Status label
+            var (statusText, statusColor) = GetStatusDisplay(prerequisite.Status);
+            var lblStatus = new Label
+            {
+                Text = statusText,
+                ForeColor = statusColor,
+                Left = 210,
+                Top = 14,
+                Width = 80,
+                AutoSize = false,
+                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                Tag = prerequisite,
+            };
+            row.Controls.Add(lblStatus);
+
+            // Install button (only when install is possible and not yet installed)
+            if (prerequisite.CanInstall && prerequisite.Status != PrerequisiteStatus.Installed)
+            {
+                var localPrereq = prerequisite; // capture for lambda
+                var localLblStatus = lblStatus;
+
+                var btnInstall = new Button
+                {
+                    Text = "Install",
+                    Left = 210,
+                    Top = 34,
+                    Width = 70,
+                    Height = 22,
+                    Tag = prerequisite,
+                };
+
+                btnInstall.Click += async (_, _) =>
+                {
+                    btnInstall.Enabled = false;
+                    localLblStatus.Text = "Installing...";
+                    localLblStatus.ForeColor = System.Drawing.Color.DarkOrange;
+
+                    var progress = new Progress<string>(msg =>
+                    {
+                        if (IsDisposed || !IsHandleCreated) return;
+                        Invoke(() => localLblStatus.Text = msg.Length > 18 ? msg[..18] + "…" : msg);
+                    });
+
+                    await localPrereq.InstallAsync(progress);
+
+                    // Re-check after installation to confirm the real status
+                    await localPrereq.CheckAsync();
+
+                    // Rebuild the whole tab so the Install button disappears on success
+                    PopulatePrerequisitesTab();
+                };
+
+                row.Controls.Add(btnInstall);
+            }
+
+            pnlPrerequisites.Controls.Add(row);
+            y += rowHeight + 4;
+        }
+
+        pnlPrerequisites.ResumeLayout();
+    }
+
+    private static (string text, System.Drawing.Color color) GetStatusDisplay(PrerequisiteStatus status)
+        => status switch
+        {
+            PrerequisiteStatus.Installed    => ("Installed",     System.Drawing.Color.Green),
+            PrerequisiteStatus.NotInstalled => ("Not installed", System.Drawing.Color.Red),
+            PrerequisiteStatus.Installing   => ("Installing...", System.Drawing.Color.DarkOrange),
+            PrerequisiteStatus.InstallFailed => ("Install failed", System.Drawing.Color.DarkRed),
+            PrerequisiteStatus.Checking     => ("Checking...",   System.Drawing.Color.Gray),
+            _                               => ("Unknown",       System.Drawing.Color.Gray),
+        };
 
     // Link Label handlers
     private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)

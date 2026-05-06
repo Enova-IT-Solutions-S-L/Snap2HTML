@@ -18,11 +18,6 @@ public class FolderScanner : IFolderScanner
     private readonly IFileSystemAbstraction _fileSystem;
     private readonly IIntegrityValidatorAggregator _integrityValidator;
 
-    public FolderScanner(IFileSystemAbstraction fileSystem)
-        : this(fileSystem, IntegrityValidatorAggregator.CreateDefault())
-    {
-    }
-
     public FolderScanner(IFileSystemAbstraction fileSystem, IIntegrityValidatorAggregator integrityValidator)
     {
         _fileSystem = fileSystem;

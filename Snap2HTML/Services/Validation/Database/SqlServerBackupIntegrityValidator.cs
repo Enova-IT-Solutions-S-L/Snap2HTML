@@ -1,10 +1,9 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Security;
 using System.Text;
 using Microsoft.Data.SqlClient;
-using Microsoft.Win32;
 using Snap2HTML.Core.Models;
+using Snap2HTML.Infrastructure.Prerequisites.SqlLocalDb;
 
 namespace Snap2HTML.Services.Validation.Database;
 
@@ -29,8 +28,7 @@ namespace Snap2HTML.Services.Validation.Database;
 /// which reads the entire backup and checks structural integrity and optional
 /// BACKUP CHECKSUM data without restoring the database.
 ///
-/// LocalDB is installed from an embedded SqlLocalDB.msi resource (fully offline,
-/// no internet connectivity required).
+/// LocalDB installation and detection is delegated to <see cref="ISqlLocalDbPrerequisite"/>.
 ///
 /// Reference: Microsoft Tape Format Specification Revision 1.00a (Seagate, 1997).
 ///            The format has been extended by SQL Server but the DBLK headers remain
@@ -43,13 +41,6 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     /// Using a separate instance avoids interfering with the user's default MSSQLLocalDB.
     /// </summary>
     private const string LocalDbInstanceName = "Snap2HTMLValidator";
-
-    /// <summary>
-    /// Name of the embedded resource containing the SqlLocalDB.msi installer.
-    /// The MSI is bundled as an embedded resource for fully offline installation
-    /// without requiring internet connectivity.
-    /// </summary>
-    private const string LocalDbMsiResourceName = "Snap2HTML.Resources.Installers.SqlLocalDB.msi";
 
     /// <summary>
     /// Threshold in bytes above which a backup file is considered "large" and
@@ -84,10 +75,19 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     /// </summary>
     private static readonly byte[] RaidAscii = Encoding.ASCII.GetBytes("RAID");
 
+    private readonly ISqlLocalDbPrerequisite _localDb;
+
     /// <summary>
-    /// Lazy-initialized flag: true when LocalDB is available and the instance is ready.
+    /// Initializes a new instance.
     /// </summary>
-    private static readonly Lazy<bool> LocalDbAvailable = new(EnsureLocalDbInstance);
+    /// <param name="localDb">
+    /// The LocalDB prerequisite whose <see cref="IPrerequisite.Status"/> determines
+    /// whether full validation is available.
+    /// </param>
+    public SqlServerBackupIntegrityValidator(ISqlLocalDbPrerequisite localDb)
+    {
+        _localDb = localDb;
+    }
 
     /// <summary>
     /// We read the first 512 bytes — enough to cover the MTF TAPE DBLK
@@ -99,7 +99,8 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     public override string CategoryName => "SQL Server Backup";
 
     /// <inheritdoc />
-    public override bool SupportsFullValidation => LocalDbAvailable.Value;
+    public override bool SupportsFullValidation
+        => _localDb.Status == PrerequisiteStatus.Installed;
 
     /// <inheritdoc />
     public override IReadOnlySet<string> SupportedExtensions => BackupExtensions;
@@ -135,7 +136,7 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     /// </remarks>
     protected override async ValueTask<IntegrityStatus> ValidateFullAsync(string filePath, CancellationToken ct)
     {
-        if (!LocalDbAvailable.Value)
+        if (_localDb.Status != PrerequisiteStatus.Installed)
             return IntegrityStatus.Valid;
 
         var connectionString = $@"Server=(localdb)\{LocalDbInstanceName};Integrated Security=true;Connection Timeout=30";
@@ -296,179 +297,6 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     }
 
     /// <summary>
-    /// Checks whether SqlLocalDB is installed, and ensures the dedicated
-    /// Snap2HTML instance exists and is running.
-    /// If LocalDB is not installed, extracts the embedded MSI and installs it
-    /// silently from the bundled resource (fully offline, no internet required).
-    /// Returns true if LocalDB is ready for use, false otherwise.
-    /// </summary>
-    /// <remarks>
-    /// Installation flow when LocalDB is absent:
-    ///   1. Extract the SqlLocalDB.msi from the embedded resource to a temp directory.
-    ///   2. Install the MSI silently with msiexec (triggers a UAC prompt).
-    ///   3. Create and start the Snap2HTML dedicated instance.
-    ///   4. Verify connectivity with a test connection.
-    /// </remarks>
-    private static bool EnsureLocalDbInstance()
-    {
-        try
-        {
-            // Check if LocalDB is already installed
-            if (!IsLocalDbInstalled())
-            {
-                Trace.TraceInformation("[SqlServerBackup] LocalDB not found. Attempting offline installation from embedded resource...");
-
-                if (!InstallLocalDbFromEmbeddedResource())
-                {
-                    Trace.TraceError("[SqlServerBackup] Failed to install LocalDB from embedded resource. " +
-                                     "Full .bak validation will be disabled.");
-                    return false;
-                }
-
-                Trace.TraceInformation("[SqlServerBackup] LocalDB installed successfully from embedded resource.");
-            }
-
-            // Create instance (idempotent — ignore failure if it already exists)
-            RunProcess("sqllocaldb.exe", $"create \"{LocalDbInstanceName}\"");
-
-            // Start instance (idempotent — ignore failure if already running)
-            RunProcess("sqllocaldb.exe", $"start \"{LocalDbInstanceName}\"");
-
-            // Verify connectivity with a real test connection
-            var connectionString = $@"Server=(localdb)\{LocalDbInstanceName};Integrated Security=true;Connection Timeout=30";
-            using var connection = new SqlConnection(connectionString);
-            connection.Open();
-
-            Trace.TraceInformation("[SqlServerBackup] LocalDB instance '{0}' is ready.", LocalDbInstanceName);
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceError("[SqlServerBackup] Failed to initialize LocalDB instance: {0}", ex.Message);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Checks the Windows Registry for any installed version of SQL Server LocalDB.
-    /// </summary>
-    private static bool IsLocalDbInstalled()
-    {
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey(
-                @"SOFTWARE\Microsoft\Microsoft SQL Server Local DB\Installed Versions");
-
-            return key?.SubKeyCount > 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Extracts the SqlLocalDB.msi from the embedded resource and installs it silently.
-    /// This is a fully offline installation — no internet access is required.
-    /// The MSI is bundled in the assembly as <see cref="LocalDbMsiResourceName"/>.
-    /// </summary>
-    private static bool InstallLocalDbFromEmbeddedResource()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), "Snap2HTML_LocalDB_Setup");
-
-        try
-        {
-            Directory.CreateDirectory(tempDir);
-
-            var msiPath = Path.Combine(tempDir, "SqlLocalDB.msi");
-
-            // Step 1: Extract MSI from embedded resource
-            if (!ExtractEmbeddedResource(LocalDbMsiResourceName, msiPath))
-            {
-                Trace.TraceError("[SqlServerBackup] Failed to extract embedded SqlLocalDB.msi resource. " +
-                                 "Ensure the resource '{0}' is included in the assembly.", LocalDbMsiResourceName);
-                return false;
-            }
-
-            Trace.TraceInformation("[SqlServerBackup] Extracted SqlLocalDB.msi to '{0}'. Starting silent install...", msiPath);
-
-            // Step 2: Install silently via msiexec (triggers UAC elevation)
-            // /l*v enables verbose logging for diagnostics if the install fails
-            var installResult = RunProcess("msiexec.exe",
-                $"/i \"{msiPath}\" /qn IACCEPTSQLLOCALDBLICENSETERMS=YES /l*v \"{Path.Combine(tempDir, "install.log")}\"",
-                elevated: true,
-                timeoutMs: 300_000); // 5 min for install
-
-            if (installResult is null)
-            {
-                // Try to read the install log for diagnostics
-                var logPath = Path.Combine(tempDir, "install.log");
-                if (File.Exists(logPath))
-                {
-                    try
-                    {
-                        var logTail = ReadLastLines(logPath, 20);
-                        Trace.TraceError("[SqlServerBackup] MSI install failed. Last log lines:\n{0}", logTail);
-                    }
-                    catch { /* best effort log reading */ }
-                }
-
-                return false;
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceError("[SqlServerBackup] Exception during LocalDB installation: {0}", ex.Message);
-            return false;
-        }
-        finally
-        {
-            // Clean up temp files
-            try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort */ }
-        }
-    }
-
-    /// <summary>
-    /// Extracts an embedded resource from the current assembly to a file on disk.
-    /// </summary>
-    /// <param name="resourceName">The fully qualified embedded resource name.</param>
-    /// <param name="destinationPath">The file path to write the resource to.</param>
-    /// <returns>True if extraction succeeded, false otherwise.</returns>
-    private static bool ExtractEmbeddedResource(string resourceName, string destinationPath)
-    {
-        try
-        {
-            using var resourceStream = Assembly.GetExecutingAssembly()
-                .GetManifestResourceStream(resourceName);
-
-            if (resourceStream is null)
-                return false;
-
-            using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            resourceStream.CopyTo(fileStream);
-
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Reads the last N lines of a text file. Used for reading MSI install logs on failure.
-    /// </summary>
-    private static string ReadLastLines(string filePath, int lineCount)
-    {
-        var lines = File.ReadAllLines(filePath);
-        var start = Math.Max(0, lines.Length - lineCount);
-        return string.Join(Environment.NewLine, lines.Skip(start));
-    }
-
-    /// <summary>
     /// Formats a TimeSpan as a human-readable string (e.g., "2h 15m 30s" or "45m 12s").
     /// </summary>
     private static string FormatElapsed(TimeSpan elapsed)
@@ -480,59 +308,5 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
             return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:D2}s";
 
         return $"{elapsed.TotalSeconds:F1}s";
-    }
-
-    /// <summary>
-    /// Runs an external process with the given arguments and returns stdout.
-    /// Returns null if the process fails or times out.
-    /// </summary>
-    /// <param name="fileName">The executable to run.</param>
-    /// <param name="arguments">Command-line arguments.</param>
-    /// <param name="elevated">If true, runs with <c>runas</c> verb (triggers UAC prompt).</param>
-    /// <param name="timeoutMs">Maximum time to wait for the process to exit.</param>
-    private static string? RunProcess(string fileName, string arguments,
-        bool elevated = false, int timeoutMs = 120_000)
-    {
-        try
-        {
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                UseShellExecute = elevated,
-                CreateNoWindow = !elevated
-            };
-
-            if (elevated)
-            {
-                process.StartInfo.Verb = "runas";
-            }
-            else
-            {
-                process.StartInfo.RedirectStandardOutput = true;
-                process.StartInfo.RedirectStandardError = true;
-            }
-
-            process.Start();
-
-            string? output = null;
-            if (!elevated)
-            {
-                output = process.StandardOutput.ReadToEnd();
-            }
-
-            if (!process.WaitForExit(timeoutMs))
-            {
-                try { process.Kill(); } catch { /* best effort */ }
-                return null;
-            }
-
-            return process.ExitCode == 0 ? (output ?? string.Empty) : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 }
