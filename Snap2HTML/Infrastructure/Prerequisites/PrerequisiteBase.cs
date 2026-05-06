@@ -1,5 +1,6 @@
-using System.Diagnostics;
 using System.Reflection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Snap2HTML.Core.Models;
 
 namespace Snap2HTML.Infrastructure.Prerequisites;
@@ -10,6 +11,17 @@ namespace Snap2HTML.Infrastructure.Prerequisites;
 /// </summary>
 public abstract class PrerequisiteBase : IPrerequisite
 {
+    private readonly ILogger _logger;
+
+    /// <summary>Logger available to subclasses.</summary>
+    protected ILogger Logger => _logger;
+
+    protected PrerequisiteBase(ILoggerFactory? loggerFactory = null)
+    {
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance)
+            .CreateLogger(GetType().FullName ?? GetType().Name);
+    }
+
     /// <inheritdoc />
     public abstract string Id { get; }
 
@@ -45,7 +57,7 @@ public abstract class PrerequisiteBase : IPrerequisite
     /// <param name="resourceName">Fully qualified embedded resource name.</param>
     /// <param name="destinationPath">Target file path to write the resource to.</param>
     /// <returns><see langword="true"/> if extraction succeeded.</returns>
-    protected static bool ExtractEmbeddedResource(string resourceName, string destinationPath)
+    protected bool ExtractEmbeddedResource(string resourceName, string destinationPath)
     {
         try
         {
@@ -54,8 +66,8 @@ public abstract class PrerequisiteBase : IPrerequisite
 
             if (resourceStream is null)
             {
-                Trace.TraceError(
-                    "[Prerequisites] Embedded resource '{0}' not found in assembly.", resourceName);
+                _logger.LogError(
+                    "Embedded resource '{ResourceName}' not found in assembly.", resourceName);
                 return false;
             }
 
@@ -63,13 +75,17 @@ public abstract class PrerequisiteBase : IPrerequisite
                 destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
             resourceStream.CopyTo(fileStream);
 
+            _logger.LogDebug(
+                "Extracted resource '{ResourceName}' to '{DestinationPath}'.",
+                resourceName, destinationPath);
+
             return true;
         }
         catch (Exception ex)
         {
-            Trace.TraceError(
-                "[Prerequisites] Failed to extract resource '{0}' to '{1}': {2}",
-                resourceName, destinationPath, ex.Message);
+            _logger.LogError(ex,
+                "Failed to extract resource '{ResourceName}' to '{DestinationPath}'.",
+                resourceName, destinationPath);
             return false;
         }
     }
@@ -87,7 +103,7 @@ public abstract class PrerequisiteBase : IPrerequisite
     /// Standard output of the process, or <see langword="null"/> if the process failed,
     /// timed out, or was run elevated (stdout is unavailable when elevated).
     /// </returns>
-    protected static string? RunProcess(
+    protected string? RunProcess(
         string fileName,
         string arguments,
         bool elevated = false,
@@ -95,8 +111,8 @@ public abstract class PrerequisiteBase : IPrerequisite
     {
         try
         {
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
+            using var process = new System.Diagnostics.Process();
+            process.StartInfo = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = fileName,
                 Arguments = arguments,
@@ -116,6 +132,8 @@ public abstract class PrerequisiteBase : IPrerequisite
 
             process.Start();
 
+            _logger.LogDebug("Started process '{FileName}' with args: {Arguments}", fileName, arguments);
+
             string? output = null;
             if (!elevated)
             {
@@ -125,18 +143,26 @@ public abstract class PrerequisiteBase : IPrerequisite
             if (!process.WaitForExit(timeoutMs))
             {
                 try { process.Kill(); } catch { /* best effort */ }
-                Trace.TraceWarning(
-                    "[Prerequisites] Process '{0} {1}' timed out after {2} ms.",
+                _logger.LogWarning(
+                    "Process '{FileName} {Arguments}' timed out after {TimeoutMs} ms.",
                     fileName, arguments, timeoutMs);
                 return null;
             }
 
-            return process.ExitCode == 0 ? (output ?? string.Empty) : null;
+            if (process.ExitCode != 0)
+            {
+                _logger.LogWarning(
+                    "Process '{FileName} {Arguments}' exited with code {ExitCode}.",
+                    fileName, arguments, process.ExitCode);
+                return null;
+            }
+
+            return output ?? string.Empty;
         }
         catch (Exception ex)
         {
-            Trace.TraceError(
-                "[Prerequisites] Failed to run '{0} {1}': {2}", fileName, arguments, ex.Message);
+            _logger.LogError(ex,
+                "Failed to run '{FileName} {Arguments}'.", fileName, arguments);
             return null;
         }
     }

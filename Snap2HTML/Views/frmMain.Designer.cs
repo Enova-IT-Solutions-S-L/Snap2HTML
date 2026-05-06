@@ -35,6 +35,15 @@
 			this.tabControl1 = new System.Windows.Forms.TabControl();
 			this.tabPage1 = new System.Windows.Forms.TabPage();
 			this.tabPagePrerequisites = new System.Windows.Forms.TabPage();
+			this.tabPageDiagnostics = new System.Windows.Forms.TabPage();
+			this.chkLoggingEnabled = new System.Windows.Forms.CheckBox();
+			this.cmbLogLevel = new System.Windows.Forms.ComboBox();
+			this.lblLogLevelCaption = new System.Windows.Forms.Label();
+			this.lblLogFolderCaption = new System.Windows.Forms.Label();
+			this.lblLogFolder = new System.Windows.Forms.Label();
+			this.btnOpenLogFolder = new System.Windows.Forms.Button();
+			this.btnGenerateReport = new System.Windows.Forms.Button();
+			this.lblReportDescription = new System.Windows.Forms.Label();
 			this.pnlPrerequisites = new System.Windows.Forms.Panel();
 			this.label2 = new System.Windows.Forms.Label();
 			this.txtTitle = new System.Windows.Forms.TextBox();
@@ -82,6 +91,7 @@
 			this.tabControl1.SuspendLayout();
 			this.tabPage1.SuspendLayout();
 			this.tabPagePrerequisites.SuspendLayout();
+			this.tabPageDiagnostics.SuspendLayout();
 			this.tabPage3.SuspendLayout();
 			((System.ComponentModel.ISupportInitialize)(this.pictureBox4)).BeginInit();
 			this.tabPage2.SuspendLayout();
@@ -113,6 +123,7 @@
 			// 
 			this.tabControl1.Controls.Add(this.tabPage1);
 			this.tabControl1.Controls.Add(this.tabPagePrerequisites);
+			this.tabControl1.Controls.Add(this.tabPageDiagnostics);
 			this.tabControl1.Controls.Add(this.tabPage3);
 			this.tabControl1.Controls.Add(this.tabPage2);
 			this.tabControl1.Location = new System.Drawing.Point(8, 8);
@@ -138,6 +149,94 @@
 			this.pnlPrerequisites.Dock = System.Windows.Forms.DockStyle.Fill;
 			this.pnlPrerequisites.Name = "pnlPrerequisites";
 			this.pnlPrerequisites.Padding = new System.Windows.Forms.Padding(6);
+			// 
+			// tabPageDiagnostics
+			// 
+			this.tabPageDiagnostics.Controls.Add(this.chkLoggingEnabled);
+			this.tabPageDiagnostics.Controls.Add(this.lblLogLevelCaption);
+			this.tabPageDiagnostics.Controls.Add(this.cmbLogLevel);
+			this.tabPageDiagnostics.Controls.Add(this.lblLogFolderCaption);
+			this.tabPageDiagnostics.Controls.Add(this.lblLogFolder);
+			this.tabPageDiagnostics.Controls.Add(this.btnOpenLogFolder);
+			this.tabPageDiagnostics.Controls.Add(this.btnGenerateReport);
+			this.tabPageDiagnostics.Controls.Add(this.lblReportDescription);
+			this.tabPageDiagnostics.Location = new System.Drawing.Point(4, 22);
+			this.tabPageDiagnostics.Name = "tabPageDiagnostics";
+			this.tabPageDiagnostics.Padding = new System.Windows.Forms.Padding(8);
+			this.tabPageDiagnostics.Size = new System.Drawing.Size(330, 310);
+			this.tabPageDiagnostics.TabIndex = 5;
+			this.tabPageDiagnostics.Text = "Diagnostics";
+			this.tabPageDiagnostics.UseVisualStyleBackColor = true;
+			// 
+			// chkLoggingEnabled
+			// 
+			this.chkLoggingEnabled.AutoSize = true;
+			this.chkLoggingEnabled.Location = new System.Drawing.Point(12, 14);
+			this.chkLoggingEnabled.Name = "chkLoggingEnabled";
+			this.chkLoggingEnabled.Size = new System.Drawing.Size(155, 17);
+			this.chkLoggingEnabled.TabIndex = 0;
+			this.chkLoggingEnabled.Text = "Enable diagnostic logging";
+			this.chkLoggingEnabled.UseVisualStyleBackColor = true;
+			// 
+			// lblLogLevelCaption
+			// 
+			this.lblLogLevelCaption.AutoSize = true;
+			this.lblLogLevelCaption.Location = new System.Drawing.Point(12, 42);
+			this.lblLogLevelCaption.Name = "lblLogLevelCaption";
+			this.lblLogLevelCaption.Size = new System.Drawing.Size(57, 13);
+			this.lblLogLevelCaption.Text = "Log level:";
+			// 
+			// cmbLogLevel
+			// 
+			this.cmbLogLevel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+			this.cmbLogLevel.FormattingEnabled = true;
+			this.cmbLogLevel.Items.AddRange(new object[] { "Verbose", "Debug", "Information", "Warning", "Error" });
+			this.cmbLogLevel.Location = new System.Drawing.Point(80, 39);
+			this.cmbLogLevel.Name = "cmbLogLevel";
+			this.cmbLogLevel.Size = new System.Drawing.Size(120, 21);
+			this.cmbLogLevel.TabIndex = 1;
+			// 
+			// lblLogFolderCaption
+			// 
+			this.lblLogFolderCaption.AutoSize = true;
+			this.lblLogFolderCaption.Location = new System.Drawing.Point(12, 74);
+			this.lblLogFolderCaption.Name = "lblLogFolderCaption";
+			this.lblLogFolderCaption.Size = new System.Drawing.Size(63, 13);
+			this.lblLogFolderCaption.Text = "Log folder:";
+			// 
+			// lblLogFolder
+			// 
+			this.lblLogFolder.AutoEllipsis = true;
+			this.lblLogFolder.Location = new System.Drawing.Point(80, 74);
+			this.lblLogFolder.Name = "lblLogFolder";
+			this.lblLogFolder.Size = new System.Drawing.Size(154, 13);
+			this.lblLogFolder.ForeColor = System.Drawing.SystemColors.GrayText;
+			// 
+			// btnOpenLogFolder
+			// 
+			this.btnOpenLogFolder.Location = new System.Drawing.Point(238, 69);
+			this.btnOpenLogFolder.Name = "btnOpenLogFolder";
+			this.btnOpenLogFolder.Size = new System.Drawing.Size(75, 23);
+			this.btnOpenLogFolder.TabIndex = 2;
+			this.btnOpenLogFolder.Text = "Open folder";
+			this.btnOpenLogFolder.UseVisualStyleBackColor = true;
+			// 
+			// btnGenerateReport
+			// 
+			this.btnGenerateReport.Location = new System.Drawing.Point(12, 114);
+			this.btnGenerateReport.Name = "btnGenerateReport";
+			this.btnGenerateReport.Size = new System.Drawing.Size(160, 28);
+			this.btnGenerateReport.TabIndex = 3;
+			this.btnGenerateReport.Text = "Generate diagnostic report";
+			this.btnGenerateReport.UseVisualStyleBackColor = true;
+			// 
+			// lblReportDescription
+			// 
+			this.lblReportDescription.Location = new System.Drawing.Point(12, 150);
+			this.lblReportDescription.Name = "lblReportDescription";
+			this.lblReportDescription.Size = new System.Drawing.Size(300, 48);
+			this.lblReportDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+			this.lblReportDescription.Text = "Packages recent log files and system information into a ZIP file ready to send to the development team.";
 			// 
 			// tabPage1
 			// 
@@ -646,6 +745,8 @@
 			this.tabPage1.ResumeLayout(false);
 			this.tabPage1.PerformLayout();
 			this.tabPagePrerequisites.ResumeLayout(false);
+			this.tabPageDiagnostics.ResumeLayout(false);
+			this.tabPageDiagnostics.PerformLayout();
 			this.tabPage3.ResumeLayout(false);
 			this.tabPage3.PerformLayout();
 			((System.ComponentModel.ISupportInitialize)(this.pictureBox4)).EndInit();
@@ -712,6 +813,15 @@
 		private System.Windows.Forms.PictureBox pictureBoxDonate;
 		private System.Windows.Forms.TabPage tabPagePrerequisites;
 		private System.Windows.Forms.Panel pnlPrerequisites;
+		private System.Windows.Forms.TabPage tabPageDiagnostics;
+		private System.Windows.Forms.CheckBox chkLoggingEnabled;
+		private System.Windows.Forms.ComboBox cmbLogLevel;
+		private System.Windows.Forms.Label lblLogLevelCaption;
+		private System.Windows.Forms.Label lblLogFolderCaption;
+		private System.Windows.Forms.Label lblLogFolder;
+		private System.Windows.Forms.Button btnOpenLogFolder;
+		private System.Windows.Forms.Button btnGenerateReport;
+		private System.Windows.Forms.Label lblReportDescription;
     }
 }
 

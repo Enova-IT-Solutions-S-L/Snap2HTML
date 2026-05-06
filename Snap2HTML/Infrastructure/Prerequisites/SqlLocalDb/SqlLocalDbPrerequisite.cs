@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using Snap2HTML.Core.Models;
 
@@ -22,6 +23,8 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
 
     private const string RegistryKey =
         @"SOFTWARE\Microsoft\Microsoft SQL Server Local DB\Installed Versions";
+
+    public SqlLocalDbPrerequisite(ILoggerFactory? loggerFactory = null) : base(loggerFactory) { }
 
     /// <inheritdoc />
     public override string Id => "SqlLocalDB";
@@ -49,17 +52,20 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
     {
         Status = PrerequisiteStatus.Checking;
 
+        Logger.LogInformation("Checking SqlLocalDB prerequisite");
+
         await Task.Run(() =>
         {
             try
             {
                 if (!IsLocalDbInstalled())
                 {
-                    Trace.TraceInformation(
-                        "[SqlLocalDb] Registry check: LocalDB is not installed.");
+                    Logger.LogInformation("SqlLocalDB not found in registry");
                     Status = PrerequisiteStatus.NotInstalled;
                     return;
                 }
+
+                Logger.LogDebug("SqlLocalDB registry entry found. Verifying instance connectivity");
 
                 // LocalDB binaries present; verify the instance is reachable.
                 EnsureInstanceRunning();
@@ -70,16 +76,12 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
                 using var connection = new SqlConnection(connectionString);
                 connection.Open();
 
-                Trace.TraceInformation(
-                    "[SqlLocalDb] Instance '{0}' is reachable. Status: Installed.",
-                    LocalDbInstanceName);
-
+                Logger.LogInformation("SqlLocalDB check passed. Instance={Instance}", LocalDbInstanceName);
                 Status = PrerequisiteStatus.Installed;
             }
             catch (Exception ex)
             {
-                Trace.TraceWarning(
-                    "[SqlLocalDb] Check failed: {0}", ex.Message);
+                Logger.LogWarning(ex, "SqlLocalDB check failed; treating as NotInstalled");
                 Status = PrerequisiteStatus.NotInstalled;
             }
         }, ct);
@@ -96,6 +98,8 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
     {
         Status = PrerequisiteStatus.Installing;
 
+        Logger.LogInformation("Starting SqlLocalDB installation");
+
         await Task.Run(() =>
         {
             var tempDir = Path.Combine(Path.GetTempPath(), "Snap2HTML_LocalDB_Setup");
@@ -106,16 +110,18 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
                 Directory.CreateDirectory(tempDir);
                 var msiPath = Path.Combine(tempDir, "SqlLocalDB.msi");
 
+                progress?.Report(
+                    "Running silent installation (a UAC prompt may appear)...");
+
                 if (!ExtractEmbeddedResource(LocalDbMsiResourceName, msiPath))
                 {
+                    Logger.LogError("Failed to extract SqlLocalDB MSI from embedded resources");
                     progress?.Report("ERROR: Could not extract the installer from resources.");
                     Status = PrerequisiteStatus.InstallFailed;
                     return;
                 }
 
-                progress?.Report(
-                    "Running silent installation (a UAC prompt may appear)...");
-
+                Logger.LogInformation("Running msiexec for SqlLocalDB. MsiPath={MsiPath}", msiPath);
                 var logPath = Path.Combine(tempDir, "install.log");
                 var installResult = RunProcess(
                     "msiexec.exe",
@@ -126,14 +132,13 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
                 if (installResult is null)
                 {
                     var tail = ReadLastLines(logPath, 20);
-                    if (!string.IsNullOrWhiteSpace(tail))
-                        Trace.TraceError("[SqlLocalDb] MSI install log tail:\n{0}", tail);
-
-                    progress?.Report("ERROR: Installation failed. Check the trace log for details.");
+                    Logger.LogError("SqlLocalDB msiexec failed. Log tail:\n{LogTail}", tail);
+                    progress?.Report("ERROR: Installation failed. Check the log files for details.");
                     Status = PrerequisiteStatus.InstallFailed;
                     return;
                 }
 
+                Logger.LogInformation("msiexec succeeded. Creating LocalDB instance={Instance}", LocalDbInstanceName);
                 progress?.Report("Installation complete. Creating database instance...");
 
                 EnsureInstanceRunning();
@@ -145,12 +150,13 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
                 using var connection = new SqlConnection(connectionString);
                 connection.Open();
 
+                Logger.LogInformation("SqlLocalDB installation and connectivity verified successfully");
                 progress?.Report("SQL Server LocalDB is ready.");
                 Status = PrerequisiteStatus.Installed;
             }
             catch (Exception ex)
             {
-                Trace.TraceError("[SqlLocalDb] Installation exception: {0}", ex.Message);
+                Logger.LogError(ex, "Unexpected error during SqlLocalDB installation");
                 progress?.Report($"ERROR: {ex.Message}");
                 Status = PrerequisiteStatus.InstallFailed;
             }
@@ -182,7 +188,7 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
     /// Creates (if absent) and starts the dedicated LocalDB instance.
     /// Both operations are idempotent — errors are silently ignored.
     /// </summary>
-    private static void EnsureInstanceRunning()
+    private void EnsureInstanceRunning()
     {
         RunProcess("sqllocaldb.exe", $"create \"{LocalDbInstanceName}\"");
         RunProcess("sqllocaldb.exe", $"start \"{LocalDbInstanceName}\"");
