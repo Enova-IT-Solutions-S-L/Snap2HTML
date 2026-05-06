@@ -1,9 +1,13 @@
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
 using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
+using Snap2HTML.Infrastructure.Prerequisites;
+using Snap2HTML.Infrastructure.Prerequisites.SqlLocalDb;
 using Snap2HTML.Presenters;
 using Snap2HTML.Services.CommandLine;
+using Snap2HTML.Services.Diagnostics;
 using Snap2HTML.Services.Generation;
 using Snap2HTML.Services.Scanning;
 using Snap2HTML.Services.Validation;
@@ -15,12 +19,17 @@ public partial class frmMain : Form, IMainFormView
     private bool _initDone;
     private bool _runningAutomated;
     private MainFormPresenter? _presenter;
+    private IPrerequisiteManager? _prerequisiteManager;
+    private IntegrityValidatorAggregator? _validatorAggregator;
+    private ILogger<frmMain> _logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<frmMain>.Instance;
 
     public frmMain()
     {
         InitializeComponent();
         InitializeIntegrityLevelComboBox();
         InitializePresenter();
+        _logger = Program.AppLoggerFactory.LoggerFactory.CreateLogger<frmMain>();
+        InitializeDiagnosticsTab();
     }
 
     private void InitializeIntegrityLevelComboBox()
@@ -31,13 +40,18 @@ public partial class frmMain : Form, IMainFormView
 
     private void InitializePresenter()
     {
+        var loggerFactory = Program.AppLoggerFactory.LoggerFactory;
         var fileSystem = new FileSystemAbstraction();
         var applicationPath = Path.GetDirectoryName(Application.ExecutablePath) ?? string.Empty;
         var templateProvider = new TemplateProvider(fileSystem, applicationPath);
-        var folderScanner = new FolderScanner(fileSystem);
-        var htmlGenerator = new HtmlGenerator(templateProvider, fileSystem);
+        var htmlGenerator = new HtmlGenerator(templateProvider, fileSystem, loggerFactory);
 
-        _presenter = new MainFormPresenter(folderScanner, htmlGenerator, this);
+        var localDbPrerequisite = new SqlLocalDbPrerequisite(loggerFactory);
+        _prerequisiteManager = new PrerequisiteManager(localDbPrerequisite);
+        _validatorAggregator = IntegrityValidatorAggregator.CreateDefault(_prerequisiteManager);
+        var folderScannerWithValidator = new FolderScanner(fileSystem, _validatorAggregator, loggerFactory);
+
+        _presenter = new MainFormPresenter(folderScannerWithValidator, htmlGenerator, this, loggerFactory);
     }
 
     #region IMainFormView Implementation
@@ -212,6 +226,22 @@ public partial class frmMain : Form, IMainFormView
         {
             StartProcessing(settings);
         }
+
+        // Run prerequisite checks in the background immediately after the form is shown
+        _ = RunPrerequisiteChecksAsync();
+    }
+
+    private async Task RunPrerequisiteChecksAsync()
+    {
+        if (_prerequisiteManager is null) return;
+
+        // Show "Checking..." in the tab before kicking off the async checks
+        PopulatePrerequisitesTab();
+
+        await _prerequisiteManager.CheckAllAsync();
+
+        // Refresh the tab with the real statuses
+        PopulatePrerequisitesTab();
     }
 
     private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
@@ -368,10 +398,153 @@ public partial class frmMain : Form, IMainFormView
 
     private void lnkSupportedFormats_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
-        var formats = IntegrityValidatorAggregator.CreateDefault().GetSupportedFormats();
+        var aggregator = _validatorAggregator
+            ?? (_prerequisiteManager is not null
+                ? IntegrityValidatorAggregator.CreateDefault(_prerequisiteManager)
+                : null);
+
+        if (aggregator is null) return;
+
+        var formats = aggregator.GetSupportedFormats();
         using var dialog = new frmSupportedFormats(formats);
         dialog.ShowDialog(this);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Prerequisites tab
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void PopulatePrerequisitesTab()
+    {
+        if (InvokeRequired)
+        {
+            Invoke(PopulatePrerequisitesTab);
+            return;
+        }
+
+        pnlPrerequisites.SuspendLayout();
+        pnlPrerequisites.Controls.Clear();
+
+        if (_prerequisiteManager is null)
+        {
+            pnlPrerequisites.ResumeLayout();
+            return;
+        }
+
+        var y = 6;
+        const int rowHeight = 72;
+        const int padding = 6;
+
+        foreach (var prerequisite in _prerequisiteManager.GetAll())
+        {
+            var row = new Panel
+            {
+                Left = padding,
+                Top = y,
+                Width = pnlPrerequisites.ClientSize.Width - padding * 2,
+                Height = rowHeight,
+                BorderStyle = BorderStyle.FixedSingle,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+            };
+
+            // Name label
+            var lblName = new Label
+            {
+                Text = prerequisite.Name,
+                Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold),
+                Left = 8,
+                Top = 8,
+                Width = 180,
+                Height = 18,
+                AutoSize = false,
+            };
+            row.Controls.Add(lblName);
+
+            // Description label
+            var lblDesc = new Label
+            {
+                Text = prerequisite.Description,
+                Left = 8,
+                Top = 30,
+                Width = 190,
+                Height = 30,
+                AutoSize = false,
+            };
+            row.Controls.Add(lblDesc);
+
+            // Status label
+            var (statusText, statusColor) = GetStatusDisplay(prerequisite.Status);
+            var lblStatus = new Label
+            {
+                Text = statusText,
+                ForeColor = statusColor,
+                Left = 210,
+                Top = 8,
+                Width = 90,
+                Height = 18,
+                AutoSize = false,
+                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                Tag = prerequisite,
+            };
+            row.Controls.Add(lblStatus);
+
+            // Install button (only when install is possible and not yet installed)
+            if (prerequisite.CanInstall && prerequisite.Status != PrerequisiteStatus.Installed)
+            {
+                var localPrereq = prerequisite; // capture for lambda
+                var localLblStatus = lblStatus;
+
+                var btnInstall = new Button
+                {
+                    Text = "Install",
+                    Left = 210,
+                    Top = 32,
+                    Width = 80,
+                    Height = 24,
+                    Tag = prerequisite,
+                };
+
+                btnInstall.Click += async (_, _) =>
+                {
+                    btnInstall.Enabled = false;
+                    localLblStatus.Text = "Installing...";
+                    localLblStatus.ForeColor = System.Drawing.Color.DarkOrange;
+
+                    var progress = new Progress<string>(msg =>
+                    {
+                        if (IsDisposed || !IsHandleCreated) return;
+                        Invoke(() => localLblStatus.Text = msg.Length > 18 ? msg[..18] + "…" : msg);
+                    });
+
+                    await localPrereq.InstallAsync(progress);
+
+                    // Re-check after installation to confirm the real status
+                    await localPrereq.CheckAsync();
+
+                    // Rebuild the whole tab so the Install button disappears on success
+                    PopulatePrerequisitesTab();
+                };
+
+                row.Controls.Add(btnInstall);
+            }
+
+            pnlPrerequisites.Controls.Add(row);
+            y += rowHeight + 4;
+        }
+
+        pnlPrerequisites.ResumeLayout();
+    }
+
+    private static (string text, System.Drawing.Color color) GetStatusDisplay(PrerequisiteStatus status)
+        => status switch
+        {
+            PrerequisiteStatus.Installed    => ("Installed",     System.Drawing.Color.Green),
+            PrerequisiteStatus.NotInstalled => ("Not installed", System.Drawing.Color.Red),
+            PrerequisiteStatus.Installing   => ("Installing...", System.Drawing.Color.DarkOrange),
+            PrerequisiteStatus.InstallFailed => ("Install failed", System.Drawing.Color.DarkRed),
+            PrerequisiteStatus.Checking     => ("Checking...",   System.Drawing.Color.Gray),
+            _                               => ("Unknown",       System.Drawing.Color.Gray),
+        };
 
     // Link Label handlers
     private void linkLabel1_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
@@ -478,6 +651,122 @@ public partial class frmMain : Form, IMainFormView
                     UseShellExecute = true
                 });
             }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Diagnostics tab
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void InitializeDiagnosticsTab()
+    {
+        var settings = Properties.Settings.Default;
+
+        // Populate controls from saved settings (suppress events during init)
+        chkLoggingEnabled.CheckedChanged -= ChkLoggingEnabled_CheckedChanged;
+        cmbLogLevel.SelectedIndexChanged -= CmbLogLevel_SelectedIndexChanged;
+
+        chkLoggingEnabled.Checked = settings.LoggingEnabled;
+        cmbLogLevel.SelectedItem = settings.LogLevel;
+        if (cmbLogLevel.SelectedIndex < 0) cmbLogLevel.SelectedIndex = 2; // Information
+
+        chkLoggingEnabled.CheckedChanged += ChkLoggingEnabled_CheckedChanged;
+        cmbLogLevel.SelectedIndexChanged += CmbLogLevel_SelectedIndexChanged;
+
+        btnOpenLogFolder.Click += BtnOpenLogFolder_Click;
+        btnGenerateReport.Click += BtnGenerateReport_Click;
+
+        RefreshDiagnosticsControlState();
+    }
+
+    private void RefreshDiagnosticsControlState()
+    {
+        var enabled = chkLoggingEnabled.Checked;
+        cmbLogLevel.Enabled = enabled;
+        btnOpenLogFolder.Enabled = enabled;
+        btnGenerateReport.Enabled = enabled;
+        lblLogFolder.Text = Program.AppLoggerFactory.LogDirectory;
+    }
+
+    private void ChkLoggingEnabled_CheckedChanged(object? sender, EventArgs e)
+    {
+        var settings = Properties.Settings.Default;
+        settings.LoggingEnabled = chkLoggingEnabled.Checked;
+        settings.Save();
+
+        var level = cmbLogLevel.SelectedItem?.ToString() ?? "Information";
+        Program.AppLoggerFactory.Configure(chkLoggingEnabled.Checked, level);
+
+        _logger.LogInformation("Logging {State}. Level={Level}",
+            chkLoggingEnabled.Checked ? "enabled" : "disabled", level);
+
+        RefreshDiagnosticsControlState();
+    }
+
+    private void CmbLogLevel_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        var level = cmbLogLevel.SelectedItem?.ToString() ?? "Information";
+        var settings = Properties.Settings.Default;
+        settings.LogLevel = level;
+        settings.Save();
+
+        if (chkLoggingEnabled.Checked)
+        {
+            Program.AppLoggerFactory.Configure(true, level);
+            _logger.LogInformation("Log level changed to {Level}", level);
+        }
+    }
+
+    private void BtnOpenLogFolder_Click(object? sender, EventArgs e)
+    {
+        var dir = Program.AppLoggerFactory.LogDirectory;
+        Directory.CreateDirectory(dir);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = dir,
+            UseShellExecute = true
+        });
+    }
+
+    private void BtnGenerateReport_Click(object? sender, EventArgs e)
+    {
+        // Flush so the current log file is complete
+        Program.AppLoggerFactory.Flush();
+
+        using var dlg = new SaveFileDialog
+        {
+            Title = "Save diagnostic report",
+            Filter = "ZIP archive (*.zip)|*.zip",
+            FileName = $"snap2html-report-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+            DefaultExt = "zip",
+        };
+
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        _logger.LogInformation("Generating diagnostic report to {Path}", dlg.FileName);
+
+        try
+        {
+            var logCount = DiagnosticReportService.GenerateReport(
+                Program.AppLoggerFactory.LogDirectory,
+                dlg.FileName);
+
+            _logger.LogInformation("Diagnostic report saved. LogFiles={Count}, Path={Path}", logCount, dlg.FileName);
+
+            MessageBox.Show(
+                $"Report saved to:\n{dlg.FileName}\n\n{logCount} log file(s) included.",
+                "Diagnostic Report",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate diagnostic report to {Path}", dlg.FileName);
+            MessageBox.Show(
+                $"Failed to generate report:\n{ex.Message}",
+                "Error",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
         }
     }
 

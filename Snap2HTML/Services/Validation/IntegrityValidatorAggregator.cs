@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Snap2HTML.Core.Models;
+using Snap2HTML.Infrastructure.Prerequisites;
 using Snap2HTML.Services.Validation.Archive;
 using Snap2HTML.Services.Validation.Audio;
 using Snap2HTML.Services.Validation.Database;
@@ -22,7 +23,11 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
     /// <summary>
     /// Creates a default aggregator with all built-in validators.
     /// </summary>
-    public static IntegrityValidatorAggregator CreateDefault() => new(
+    /// <param name="prerequisiteManager">
+    /// The prerequisite manager used to resolve optional runtime dependencies
+    /// (e.g., SQL Server LocalDB for .bak validation).
+    /// </param>
+    public static IntegrityValidatorAggregator CreateDefault(IPrerequisiteManager prerequisiteManager) => new(
         new ImageIntegrityValidator(),
         new PdfIntegrityValidator(),
         new VideoIntegrityValidator(),
@@ -31,7 +36,10 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
         new DocumentIntegrityValidator(),
         new DatabaseIntegrityValidator(),
         new SqlServerIntegrityValidator(),
-        new SqlServerBackupIntegrityValidator());
+        new SqlServerBackupIntegrityValidator(
+            prerequisiteManager.Get<Infrastructure.Prerequisites.SqlLocalDb.ISqlLocalDbPrerequisite>()
+            ?? throw new InvalidOperationException(
+                "ISqlLocalDbPrerequisite is not registered in the prerequisite manager.")));
 
     /// <summary>
     /// Creates a new aggregator with the specified validators.

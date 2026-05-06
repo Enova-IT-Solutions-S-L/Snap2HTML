@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Snap2HTML.Core.Models;
 using Snap2HTML.Services.Generation;
 using Snap2HTML.Services.Scanning;
@@ -75,16 +77,20 @@ public class MainFormPresenter
     private readonly IFolderScanner _folderScanner;
     private readonly IHtmlGenerator _htmlGenerator;
     private readonly IMainFormView _view;
+    private readonly ILogger<MainFormPresenter> _logger;
     private CancellationTokenSource? _cancellationTokenSource;
 
     public MainFormPresenter(
         IFolderScanner folderScanner,
         IHtmlGenerator htmlGenerator,
-        IMainFormView view)
+        IMainFormView view,
+        ILoggerFactory? loggerFactory = null)
     {
         _folderScanner = folderScanner;
         _htmlGenerator = htmlGenerator;
         _view = view;
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance)
+            .CreateLogger<MainFormPresenter>();
     }
 
     /// <summary>
@@ -112,6 +118,12 @@ public class MainFormPresenter
         IsProcessing = true;
         _cancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = _cancellationTokenSource.Token;
+
+        _logger.LogInformation(
+            "Snapshot started. Root={RootFolder}, IntegrityLevel={IntegrityLevel}, Hash={Hash}",
+            settings.RootFolder, settings.IntegrityLevel, settings.EnableHashing);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
@@ -142,6 +154,7 @@ public class MainFormPresenter
 
             if (scanResult.WasCancelled)
             {
+                _logger.LogInformation("Scan was cancelled");
                 return new SnapshotResult
                 {
                     Success = false,
@@ -151,12 +164,18 @@ public class MainFormPresenter
 
             if (!string.IsNullOrEmpty(scanResult.ErrorMessage))
             {
+                _logger.LogError("Scan returned an error: {ErrorMessage}", scanResult.ErrorMessage);
                 return new SnapshotResult
                 {
                     Success = false,
                     ErrorMessage = scanResult.ErrorMessage
                 };
             }
+
+            _logger.LogInformation(
+                "Scan complete. Dirs={Dirs}, Files={Files}, Size={Size} bytes, IntegrityCorrupt={Corrupt}/{Checked}",
+                scanResult.TotalDirectories, scanResult.TotalFiles, scanResult.TotalSize,
+                scanResult.IntegrityCorruptCount, scanResult.IntegrityCheckedCount);
 
             // Create HTML generation options
             var htmlOptions = new HtmlGenerationOptions
@@ -186,6 +205,7 @@ public class MainFormPresenter
 
             if (htmlResult.WasCancelled)
             {
+                _logger.LogInformation("HTML generation was cancelled");
                 return new SnapshotResult
                 {
                     Success = false,
@@ -195,6 +215,7 @@ public class MainFormPresenter
 
             if (!htmlResult.Success)
             {
+                _logger.LogError("HTML generation failed: {ErrorMessage}", htmlResult.ErrorMessage);
                 _view.ShowError("Error", htmlResult.ErrorMessage ?? "An unknown error occurred.");
                 return new SnapshotResult
                 {
@@ -202,6 +223,10 @@ public class MainFormPresenter
                     ErrorMessage = htmlResult.ErrorMessage
                 };
             }
+
+            _logger.LogInformation(
+                "Snapshot complete in {Elapsed} ms. Output={OutputPath}",
+                sw.ElapsedMilliseconds, htmlResult.OutputPath);
 
             _view.UpdateProgress(new MainFormProgress
             {
@@ -217,6 +242,7 @@ public class MainFormPresenter
         }
         catch (OperationCanceledException)
         {
+            _logger.LogInformation("Snapshot cancelled by user after {Elapsed} ms", sw.ElapsedMilliseconds);
             _view.UpdateProgress(new MainFormProgress
             {
                 StatusMessage = "User cancelled"
@@ -230,6 +256,7 @@ public class MainFormPresenter
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Snapshot failed after {Elapsed} ms", sw.ElapsedMilliseconds);
             _view.ShowError("Error", ex.Message);
             return new SnapshotResult
             {

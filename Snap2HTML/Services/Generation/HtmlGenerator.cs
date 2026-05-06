@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
@@ -14,11 +16,16 @@ public class HtmlGenerator : IHtmlGenerator
 {
     private readonly ITemplateProvider _templateProvider;
     private readonly IFileSystemAbstraction _fileSystem;
+    private readonly ILogger<HtmlGenerator> _logger;
 
-    public HtmlGenerator(ITemplateProvider templateProvider, IFileSystemAbstraction fileSystem)
+    public HtmlGenerator(
+        ITemplateProvider templateProvider,
+        IFileSystemAbstraction fileSystem,
+        ILoggerFactory? loggerFactory = null)
     {
         _templateProvider = templateProvider;
         _fileSystem = fileSystem;
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<HtmlGenerator>();
     }
 
     public async Task<HtmlGenerationResult> GenerateAsync(
@@ -28,6 +35,11 @@ public class HtmlGenerator : IHtmlGenerator
         CancellationToken cancellationToken = default)
     {
         var result = new HtmlGenerationResult();
+        var sw = Stopwatch.StartNew();
+
+        _logger.LogInformation(
+            "HTML generation started. Output={OutputFile}, Folders={Folders}, Files={Files}",
+            options.OutputFile, scanResult.Folders.Count, scanResult.TotalFiles);
 
         try
         {
@@ -42,9 +54,11 @@ public class HtmlGenerator : IHtmlGenerator
             try
             {
                 templateContent = await _templateProvider.LoadTemplateAsync(null, cancellationToken);
+                _logger.LogDebug("Template loaded. Length={Length} chars", templateContent.Length);
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to load HTML template");
                 result.Success = false;
                 result.ErrorMessage = $"Failed to open 'Template.html' for reading: {ex.Message}";
                 return result;
@@ -100,10 +114,15 @@ public class HtmlGenerator : IHtmlGenerator
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to write HTML output to '{OutputFile}'", options.OutputFile);
                 result.Success = false;
                 result.ErrorMessage = $"Failed to open file for writing: {ex.Message}";
                 return result;
             }
+
+            _logger.LogInformation(
+                "HTML generation complete in {Elapsed} ms. Output={OutputFile}",
+                sw.ElapsedMilliseconds, options.OutputFile);
 
             progress?.Report(new HtmlGenerationProgress
             {
@@ -113,10 +132,12 @@ public class HtmlGenerator : IHtmlGenerator
         }
         catch (OperationCanceledException)
         {
+            _logger.LogInformation("HTML generation cancelled after {Elapsed} ms", sw.ElapsedMilliseconds);
             result.WasCancelled = true;
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Unexpected error during HTML generation after {Elapsed} ms", sw.ElapsedMilliseconds);
             result.Success = false;
             result.ErrorMessage = ex.Message;
         }

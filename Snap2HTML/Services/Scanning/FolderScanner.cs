@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Snap2HTML.Core.Models;
 using Snap2HTML.Core.Utilities;
 using Snap2HTML.Infrastructure.FileSystem;
@@ -17,16 +19,16 @@ public class FolderScanner : IFolderScanner
 {
     private readonly IFileSystemAbstraction _fileSystem;
     private readonly IIntegrityValidatorAggregator _integrityValidator;
+    private readonly ILogger<FolderScanner> _logger;
 
-    public FolderScanner(IFileSystemAbstraction fileSystem)
-        : this(fileSystem, IntegrityValidatorAggregator.CreateDefault())
-    {
-    }
-
-    public FolderScanner(IFileSystemAbstraction fileSystem, IIntegrityValidatorAggregator integrityValidator)
+    public FolderScanner(
+        IFileSystemAbstraction fileSystem,
+        IIntegrityValidatorAggregator integrityValidator,
+        ILoggerFactory? loggerFactory = null)
     {
         _fileSystem = fileSystem;
         _integrityValidator = integrityValidator;
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<FolderScanner>();
     }
 
     public async Task<ScanResult> ScanAsync(
@@ -35,6 +37,11 @@ public class FolderScanner : IFolderScanner
         CancellationToken cancellationToken = default)
     {
         var result = new ScanResult();
+
+        _logger.LogInformation(
+            "Scan started. Root={Root}, Hidden={SkipHidden}, System={SkipSystem}, Hash={Hash}, Integrity={Integrity}",
+            options.RootFolder, options.SkipHiddenItems, options.SkipSystemItems,
+            options.EnableHashing, options.IntegrityLevel);
 
         try
         {
@@ -56,6 +63,8 @@ public class FolderScanner : IFolderScanner
 
             dirs = StringUtils.SortDirList(dirs);
 
+            _logger.LogDebug("Directory collection complete. Count={Count}", dirs.Count);
+
             // Process directories
             stopwatch.Restart();
 
@@ -66,11 +75,13 @@ public class FolderScanner : IFolderScanner
             int totFiles;
             if (dirs.Count > 10)
             {
+                _logger.LogDebug("Using parallel directory processing. Dirs={Count}", dirs.Count);
                 totFiles = await ProcessDirectoriesParallelAsync(
                     dirs, folders, options, stopwatch, progress, cancellationToken);
             }
             else
             {
+                _logger.LogDebug("Using sequential directory processing. Dirs={Count}", dirs.Count);
                 // Sequential processing for small sets
                 totFiles = await ProcessDirectoriesSequentialAsync(
                     dirs, folders, options, stopwatch, progress, cancellationToken);
@@ -90,13 +101,20 @@ public class FolderScanner : IFolderScanner
 
             // Calculate stats
             CalculateStats(result);
+
+            _logger.LogInformation(
+                "Scan complete. Dirs={Dirs}, Files={Files}, Size={Size} bytes, IntegrityChecked={Checked}, Corrupt={Corrupt}",
+                result.TotalDirectories, result.TotalFiles, result.TotalSize,
+                result.IntegrityCheckedCount, result.IntegrityCorruptCount);
         }
         catch (OperationCanceledException)
         {
+            _logger.LogInformation("Scan cancelled");
             result.WasCancelled = true;
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Unexpected error during folder scan");
             result.ErrorMessage = ex.Message;
         }
 
@@ -153,7 +171,7 @@ public class FolderScanner : IFolderScanner
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"ERROR in CollectDirectoriesAsync(): {ex.Message}");
+                    _logger.LogWarning(ex, "Error collecting directory");
                 }
             }
         }, cancellationToken);
@@ -292,7 +310,7 @@ public class FolderScanner : IFolderScanner
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex} Exception caught.");
+            _logger.LogWarning(ex, "Error setting folder metadata: {Directory}", dirName);
         }
     }
 
@@ -318,7 +336,7 @@ public class FolderScanner : IFolderScanner
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex} Exception caught.");
+            _logger.LogWarning(ex, "Error enumerating files in: {Directory}", dirName);
         }
 
         // Sort files by name
@@ -366,7 +384,7 @@ public class FolderScanner : IFolderScanner
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex} Exception caught.");
+            _logger.LogDebug(ex, "Skipping file: {FilePath}", filePath);
             return null;
         }
     }
@@ -385,12 +403,12 @@ public class FolderScanner : IFolderScanner
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error validating integrity for {filePath}: {ex.Message}");
+            _logger.LogWarning(ex, "Integrity validation error: {FilePath}", filePath);
             return IntegrityStatus.Unknown;
         }
     }
 
-    private static string ComputeFileHash(string filePath)
+    private string ComputeFileHash(string filePath)
     {
         try
         {
@@ -400,7 +418,7 @@ public class FolderScanner : IFolderScanner
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error computing hash for {filePath}: {ex.Message}");
+            _logger.LogDebug(ex, "Error computing hash: {FilePath}", filePath);
             return string.Empty;
         }
     }
