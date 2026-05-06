@@ -1,5 +1,6 @@
 using System.Diagnostics;
-using System.Net.Http;
+using System.Reflection;
+using System.Security;
 using System.Text;
 using Microsoft.Data.SqlClient;
 using Microsoft.Win32;
@@ -28,6 +29,9 @@ namespace Snap2HTML.Services.Validation.Database;
 /// which reads the entire backup and checks structural integrity and optional
 /// BACKUP CHECKSUM data without restoring the database.
 ///
+/// LocalDB is installed from an embedded SqlLocalDB.msi resource (fully offline,
+/// no internet connectivity required).
+///
 /// Reference: Microsoft Tape Format Specification Revision 1.00a (Seagate, 1997).
 ///            The format has been extended by SQL Server but the DBLK headers remain
 ///            compatible with the MTF spec.
@@ -39,6 +43,30 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     /// Using a separate instance avoids interfering with the user's default MSSQLLocalDB.
     /// </summary>
     private const string LocalDbInstanceName = "Snap2HTMLValidator";
+
+    /// <summary>
+    /// Name of the embedded resource containing the SqlLocalDB.msi installer.
+    /// The MSI is bundled as an embedded resource for fully offline installation
+    /// without requiring internet connectivity.
+    /// </summary>
+    private const string LocalDbMsiResourceName = "Snap2HTML.Resources.Installers.SqlLocalDB.msi";
+
+    /// <summary>
+    /// Threshold in bytes above which a backup file is considered "large" and
+    /// receives an extended command timeout. 10 GB.
+    /// </summary>
+    private const long LargeFileThresholdBytes = 10L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Base command timeout in seconds for RESTORE VERIFYONLY on normal-sized backups.
+    /// </summary>
+    private const int BaseCommandTimeoutSeconds = 3600; // 1 hour
+
+    /// <summary>
+    /// Extended command timeout in seconds for backups larger than <see cref="LargeFileThresholdBytes"/>.
+    /// Large backups (10 GB+) can take several hours to verify.
+    /// </summary>
+    private const int ExtendedCommandTimeoutSeconds = 14400; // 4 hours
 
     private static readonly HashSet<string> BackupExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -62,7 +90,7 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     private static readonly Lazy<bool> LocalDbAvailable = new(EnsureLocalDbInstance);
 
     /// <summary>
-    /// We read the first 0xE0 (224) bytes — enough to cover the MTF TAPE DBLK
+    /// We read the first 512 bytes — enough to cover the MTF TAPE DBLK
     /// header region where both signatures reside.
     /// </summary>
     protected override int MagicBytesBufferSize => 512;
@@ -98,6 +126,11 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     ///   - The backup set structure and headers are readable.
     ///   - Page checksums match (if the backup was created WITH CHECKSUM).
     ///   - The backup is not truncated.
+    ///
+    /// For large files (10 GB+), the command timeout is extended to 4 hours and
+    /// SQL Server informational messages (percentage complete) are captured via
+    /// the <see cref="SqlConnection.InfoMessage"/> event using STATS = 5.
+    ///
     /// If LocalDB is not available, falls back to returning Valid (header-only validation).
     /// </remarks>
     protected override async ValueTask<IntegrityStatus> ValidateFullAsync(string filePath, CancellationToken ct)
@@ -107,29 +140,137 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
 
         var connectionString = $@"Server=(localdb)\{LocalDbInstanceName};Integrated Security=true;Connection Timeout=30";
 
+        long fileSize;
+        try
+        {
+            fileSize = new FileInfo(filePath).Length;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            Trace.TraceWarning(
+                "[SqlServerBackup] Cannot read file size for '{0}': {1}", filePath, ex.Message);
+            return IntegrityStatus.DecodingFailed;
+        }
+
+        var isLargeFile = fileSize >= LargeFileThresholdBytes;
+        var fileSizeGb = fileSize / (1024.0 * 1024.0 * 1024.0);
+        var commandTimeout = isLargeFile ? ExtendedCommandTimeoutSeconds : BaseCommandTimeoutSeconds;
+
+        if (isLargeFile)
+        {
+            Trace.TraceInformation(
+                "[SqlServerBackup] Large backup detected: '{0}' ({1:F2} GB). " +
+                "Using extended timeout of {2} seconds. Verification may take a long time.",
+                filePath, fileSizeGb, commandTimeout);
+        }
+
         try
         {
             await using var connection = new SqlConnection(connectionString);
+
+            // Subscribe to SQL Server informational messages (severity < 11) to capture
+            // progress reports that RESTORE VERIFYONLY emits for large backups.
+            connection.InfoMessage += (_, args) =>
+            {
+                foreach (SqlError error in args.Errors)
+                {
+                    if (error.Class == 0)
+                    {
+                        // Informational messages: progress percentage, backup set info, etc.
+                        Trace.TraceInformation(
+                            "[SqlServerBackup] [{0}] Info: {1}", Path.GetFileName(filePath), error.Message);
+                    }
+                    else
+                    {
+                        Trace.TraceWarning(
+                            "[SqlServerBackup] [{0}] Warning (Class {1}, Number {2}): {3}",
+                            Path.GetFileName(filePath), error.Class, error.Number, error.Message);
+                    }
+                }
+            };
+
+            // FireInfoMessageEventOnUserErrors ensures we get ALL messages, including
+            // those with severity > 0 that would otherwise only appear as exceptions.
+            connection.FireInfoMessageEventOnUserErrors = true;
+
             await connection.OpenAsync(ct);
 
             // RESTORE VERIFYONLY reads the backup and validates its integrity
             // WITH CHECKSUM also verifies page-level checksums when present
-            const string sql = "RESTORE VERIFYONLY FROM DISK = @path WITH CHECKSUM";
+            // STATS=5 emits progress messages every 5% — useful for large backups
+            var sql = isLargeFile
+                ? "RESTORE VERIFYONLY FROM DISK = @path WITH CHECKSUM, STATS = 5"
+                : "RESTORE VERIFYONLY FROM DISK = @path WITH CHECKSUM";
 
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@path", filePath);
-            command.CommandTimeout = 3600; // Large backups can take a long time
+            command.CommandTimeout = commandTimeout;
+
+            var stopwatch = Stopwatch.StartNew();
 
             await command.ExecuteNonQueryAsync(ct);
 
+            stopwatch.Stop();
+
+            if (isLargeFile)
+            {
+                Trace.TraceInformation(
+                    "[SqlServerBackup] Verification of '{0}' ({1:F2} GB) completed successfully in {2}.",
+                    filePath, fileSizeGb, FormatElapsed(stopwatch.Elapsed));
+            }
+
             return IntegrityStatus.Valid;
         }
-        catch (SqlException ex) when (ex.Number is 3013 or 3180 or 3183 or 3201)
+        catch (SqlException ex) when (ex.Number is 3013 or 3180 or 3183 or 3201
+                                          or 3241 or 3242 or 3243 or 3244
+                                          or 3456 or 3271)
         {
             // 3013 = RESTORE VERIFYONLY is terminating abnormally
             // 3180 = Backup set cannot be restored (corrupt or incompatible)
             // 3183 = RESTORE detected an error on page
             // 3201 = Cannot open backup device (permissions / path)
+            // 3241 = The media family is not recognized (corrupt media header)
+            // 3242 = The file is not a valid Microsoft Tape Format backup set
+            // 3243 = The media loaded is formatted with a newer version
+            // 3244 = Page size mismatch in the backup
+            // 3456 = Could not redo log record (transaction log corruption)
+            // 3271 = A nonrecoverable I/O error occurred on file
+            Trace.TraceError(
+                "[SqlServerBackup] Verification FAILED for '{0}' ({1:F2} GB). " +
+                "SQL Error {2}: {3}",
+                filePath, fileSizeGb, ex.Number, ex.Message);
+            return IntegrityStatus.DecodingFailed;
+        }
+        catch (SqlException ex) when (ex.Number == -2)
+        {
+            // -2 = Timeout expired
+            Trace.TraceError(
+                "[SqlServerBackup] Verification TIMED OUT for '{0}' ({1:F2} GB) " +
+                "after {2} seconds. The backup may be too large for the configured timeout.",
+                filePath, fileSizeGb, commandTimeout);
+            return IntegrityStatus.DecodingFailed;
+        }
+        catch (SqlException ex)
+        {
+            // Any other SQL error not explicitly handled
+            Trace.TraceError(
+                "[SqlServerBackup] Unexpected SQL error verifying '{0}' ({1:F2} GB). " +
+                "Error {2} (Class {3}): {4}",
+                filePath, fileSizeGb, ex.Number, ex.Class, ex.Message);
+            return IntegrityStatus.DecodingFailed;
+        }
+        catch (OperationCanceledException)
+        {
+            Trace.TraceWarning(
+                "[SqlServerBackup] Verification of '{0}' ({1:F2} GB) was cancelled.",
+                filePath, fileSizeGb);
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Trace.TraceError(
+                "[SqlServerBackup] Unexpected error verifying '{0}' ({1:F2} GB): {2}",
+                filePath, fileSizeGb, ex.Message);
             return IntegrityStatus.DecodingFailed;
         }
     }
@@ -155,25 +296,18 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     }
 
     /// <summary>
-    /// Stable Microsoft redirect URL for the SQL Server 2022 Express bootstrapper (SSEI).
-    /// The bootstrapper is ~6 MB and supports downloading just the LocalDB MSI via
-    /// <c>/ACTION=Download /MEDIATYPE=LocalDB</c>.
-    /// </summary>
-    private const string SseiDownloadUrl = "https://go.microsoft.com/fwlink/?linkid=2215160";
-
-    /// <summary>
     /// Checks whether SqlLocalDB is installed, and ensures the dedicated
     /// Snap2HTML instance exists and is running.
-    /// If LocalDB is not installed, downloads and installs it silently.
+    /// If LocalDB is not installed, extracts the embedded MSI and installs it
+    /// silently from the bundled resource (fully offline, no internet required).
     /// Returns true if LocalDB is ready for use, false otherwise.
     /// </summary>
     /// <remarks>
     /// Installation flow when LocalDB is absent:
-    ///   1. Download the SQL Server 2022 Express bootstrapper (SSEI) from Microsoft.
-    ///   2. Use SSEI to download only the LocalDB MSI (~50 MB).
-    ///   3. Install the MSI silently with msiexec (triggers a UAC prompt).
-    ///   4. Create and start the Snap2HTML dedicated instance.
-    ///   5. Verify connectivity with a test connection.
+    ///   1. Extract the SqlLocalDB.msi from the embedded resource to a temp directory.
+    ///   2. Install the MSI silently with msiexec (triggers a UAC prompt).
+    ///   3. Create and start the Snap2HTML dedicated instance.
+    ///   4. Verify connectivity with a test connection.
     /// </remarks>
     private static bool EnsureLocalDbInstance()
     {
@@ -182,8 +316,16 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
             // Check if LocalDB is already installed
             if (!IsLocalDbInstalled())
             {
-                if (!DownloadAndInstallLocalDb())
+                Trace.TraceInformation("[SqlServerBackup] LocalDB not found. Attempting offline installation from embedded resource...");
+
+                if (!InstallLocalDbFromEmbeddedResource())
+                {
+                    Trace.TraceError("[SqlServerBackup] Failed to install LocalDB from embedded resource. " +
+                                     "Full .bak validation will be disabled.");
                     return false;
+                }
+
+                Trace.TraceInformation("[SqlServerBackup] LocalDB installed successfully from embedded resource.");
             }
 
             // Create instance (idempotent — ignore failure if it already exists)
@@ -197,10 +339,13 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
             using var connection = new SqlConnection(connectionString);
             connection.Open();
 
+            Trace.TraceInformation("[SqlServerBackup] LocalDB instance '{0}' is ready.", LocalDbInstanceName);
+
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceError("[SqlServerBackup] Failed to initialize LocalDB instance: {0}", ex.Message);
             return false;
         }
     }
@@ -224,10 +369,11 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     }
 
     /// <summary>
-    /// Downloads the SQL Server 2022 Express bootstrapper (SSEI), uses it to
-    /// download the LocalDB MSI, and installs it silently.
+    /// Extracts the SqlLocalDB.msi from the embedded resource and installs it silently.
+    /// This is a fully offline installation — no internet access is required.
+    /// The MSI is bundled in the assembly as <see cref="LocalDbMsiResourceName"/>.
     /// </summary>
-    private static bool DownloadAndInstallLocalDb()
+    private static bool InstallLocalDbFromEmbeddedResource()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "Snap2HTML_LocalDB_Setup");
 
@@ -235,35 +381,47 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
         {
             Directory.CreateDirectory(tempDir);
 
-            var sseiPath = Path.Combine(tempDir, "SQL2022-SSEI-Expr.exe");
-            var mediaDir = Path.Combine(tempDir, "Media");
+            var msiPath = Path.Combine(tempDir, "SqlLocalDB.msi");
 
-            // Step 1: Download the SSEI bootstrapper (~6 MB)
-            if (!DownloadFile(SseiDownloadUrl, sseiPath))
+            // Step 1: Extract MSI from embedded resource
+            if (!ExtractEmbeddedResource(LocalDbMsiResourceName, msiPath))
+            {
+                Trace.TraceError("[SqlServerBackup] Failed to extract embedded SqlLocalDB.msi resource. " +
+                                 "Ensure the resource '{0}' is included in the assembly.", LocalDbMsiResourceName);
                 return false;
+            }
 
-            // Step 2: Use SSEI to download just the LocalDB MSI (~50 MB)
-            var downloadResult = RunProcess(sseiPath,
-                $"/ACTION=Download /MEDIAPATH=\"{mediaDir}\" /MEDIATYPE=LocalDB /QUIET");
+            Trace.TraceInformation("[SqlServerBackup] Extracted SqlLocalDB.msi to '{0}'. Starting silent install...", msiPath);
 
-            if (downloadResult is null)
-                return false;
-
-            // Step 3: Find the downloaded MSI
-            var msiPath = Path.Combine(mediaDir, "SqlLocalDB.msi");
-            if (!File.Exists(msiPath))
-                return false;
-
-            // Step 4: Install silently via msiexec (triggers UAC elevation)
+            // Step 2: Install silently via msiexec (triggers UAC elevation)
+            // /l*v enables verbose logging for diagnostics if the install fails
             var installResult = RunProcess("msiexec.exe",
-                $"/i \"{msiPath}\" /qn IACCEPTSQLLOCALDBLICENSETERMS=YES",
+                $"/i \"{msiPath}\" /qn IACCEPTSQLLOCALDBLICENSETERMS=YES /l*v \"{Path.Combine(tempDir, "install.log")}\"",
                 elevated: true,
                 timeoutMs: 300_000); // 5 min for install
 
-            return installResult is not null;
+            if (installResult is null)
+            {
+                // Try to read the install log for diagnostics
+                var logPath = Path.Combine(tempDir, "install.log");
+                if (File.Exists(logPath))
+                {
+                    try
+                    {
+                        var logTail = ReadLastLines(logPath, 20);
+                        Trace.TraceError("[SqlServerBackup] MSI install failed. Last log lines:\n{0}", logTail);
+                    }
+                    catch { /* best effort log reading */ }
+                }
+
+                return false;
+            }
+
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Trace.TraceError("[SqlServerBackup] Exception during LocalDB installation: {0}", ex.Message);
             return false;
         }
         finally
@@ -274,18 +432,23 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
     }
 
     /// <summary>
-    /// Downloads a file from the given URL to a local path.
+    /// Extracts an embedded resource from the current assembly to a file on disk.
     /// </summary>
-    private static bool DownloadFile(string url, string destinationPath)
+    /// <param name="resourceName">The fully qualified embedded resource name.</param>
+    /// <param name="destinationPath">The file path to write the resource to.</param>
+    /// <returns>True if extraction succeeded, false otherwise.</returns>
+    private static bool ExtractEmbeddedResource(string resourceName, string destinationPath)
     {
         try
         {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-            using var response = httpClient.GetAsync(url).GetAwaiter().GetResult();
-            response.EnsureSuccessStatusCode();
+            using var resourceStream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream(resourceName);
 
-            using var fs = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
-            response.Content.CopyToAsync(fs).GetAwaiter().GetResult();
+            if (resourceStream is null)
+                return false;
+
+            using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            resourceStream.CopyTo(fileStream);
 
             return true;
         }
@@ -293,6 +456,30 @@ public class SqlServerBackupIntegrityValidator : FileIntegrityValidatorBase, ISq
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads the last N lines of a text file. Used for reading MSI install logs on failure.
+    /// </summary>
+    private static string ReadLastLines(string filePath, int lineCount)
+    {
+        var lines = File.ReadAllLines(filePath);
+        var start = Math.Max(0, lines.Length - lineCount);
+        return string.Join(Environment.NewLine, lines.Skip(start));
+    }
+
+    /// <summary>
+    /// Formats a TimeSpan as a human-readable string (e.g., "2h 15m 30s" or "45m 12s").
+    /// </summary>
+    private static string FormatElapsed(TimeSpan elapsed)
+    {
+        if (elapsed.TotalHours >= 1)
+            return $"{(int)elapsed.TotalHours}h {elapsed.Minutes:D2}m {elapsed.Seconds:D2}s";
+
+        if (elapsed.TotalMinutes >= 1)
+            return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:D2}s";
+
+        return $"{elapsed.TotalSeconds:F1}s";
     }
 
     /// <summary>
