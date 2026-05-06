@@ -30,7 +30,8 @@ public class IntegrityValidatorAggregator : IIntegrityValidatorAggregator
         new ArchiveIntegrityValidator(),
         new DocumentIntegrityValidator(),
         new DatabaseIntegrityValidator(),
-        new SqlServerIntegrityValidator());
+        new SqlServerIntegrityValidator(),
+        new SqlServerBackupIntegrityValidator());
 
     /// <summary>
     /// Creates a new aggregator with the specified validators.
