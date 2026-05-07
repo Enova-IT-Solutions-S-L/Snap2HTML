@@ -123,9 +123,12 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
 
                 Logger.LogInformation("Running msiexec for SqlLocalDB. MsiPath={MsiPath}", msiPath);
                 var logPath = Path.Combine(tempDir, "install.log");
+                // REINSTALL=ALL REINSTALLMODE=amus forces all files to be overwritten even
+                // when the same MSI version is already installed (otherwise msiexec exits in <1 s
+                // and does nothing, leaving broken binaries in place).
                 var installResult = RunProcess(
                     "msiexec.exe",
-                    $"/i \"{msiPath}\" /qn IACCEPTSQLLOCALDBLICENSETERMS=YES /l*v \"{logPath}\"",
+                    $"/i \"{msiPath}\" /qn REINSTALL=ALL REINSTALLMODE=amus IACCEPTSQLLOCALDBLICENSETERMS=YES /l*v \"{logPath}\"",
                     elevated: true,
                     timeoutMs: 300_000); // 5 min
 
@@ -138,8 +141,14 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
                     return;
                 }
 
-                Logger.LogInformation("msiexec succeeded. Creating LocalDB instance={Instance}", LocalDbInstanceName);
+                Logger.LogInformation("msiexec succeeded. Recreating LocalDB instance={Instance}", LocalDbInstanceName);
                 progress?.Report("Installation complete. Creating database instance...");
+
+                // Stop and delete any existing (possibly broken) instance so the fresh binaries
+                // get a clean instance directory. Both commands are idempotent — failures are
+                // expected when the instance doesn't exist yet and are already logged by RunProcess.
+                RunProcess("sqllocaldb.exe", $"stop \"{LocalDbInstanceName}\" -i");
+                RunProcess("sqllocaldb.exe", $"delete \"{LocalDbInstanceName}\"");
 
                 EnsureInstanceRunning();
 
@@ -190,7 +199,12 @@ public sealed class SqlLocalDbPrerequisite : PrerequisiteBase, ISqlLocalDbPrereq
     /// </summary>
     private void EnsureInstanceRunning()
     {
-        RunProcess("sqllocaldb.exe", $"create \"{LocalDbInstanceName}\"");
-        RunProcess("sqllocaldb.exe", $"start \"{LocalDbInstanceName}\"");
+        var createOutput = RunProcess("sqllocaldb.exe", $"create \"{LocalDbInstanceName}\"");
+        if (createOutput is not null)
+            Logger.LogDebug("sqllocaldb create output: {Output}", createOutput.Trim());
+
+        var startOutput = RunProcess("sqllocaldb.exe", $"start \"{LocalDbInstanceName}\"");
+        if (startOutput is not null)
+            Logger.LogDebug("sqllocaldb start output: {Output}", startOutput.Trim());
     }
 }

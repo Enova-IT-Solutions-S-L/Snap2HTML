@@ -432,100 +432,193 @@ public partial class frmMain : Form, IMainFormView
         }
 
         var y = 6;
-        const int rowHeight = 72;
+        const int rowHeight = 112;
         const int padding = 6;
+        const int btnW = 70;
+        const int btnH = 24;
+        const int rightMargin = 8;
 
         foreach (var prerequisite in _prerequisiteManager.GetAll())
         {
+            var rowWidth = pnlPrerequisites.ClientSize.Width - padding * 2;
+
             var row = new Panel
             {
                 Left = padding,
                 Top = y,
-                Width = pnlPrerequisites.ClientSize.Width - padding * 2,
+                Width = rowWidth,
                 Height = rowHeight,
                 BorderStyle = BorderStyle.FixedSingle,
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
             };
 
-            // Name label
+            // ── Right-side buttons (anchored to top-right) ──────────────────
+
+            // "Check" button — always visible
+            var btnCheck = new Button
+            {
+                Text = "Check",
+                Left = rowWidth - rightMargin - btnW,
+                Top = 6,
+                Width = btnW,
+                Height = btnH,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            };
+            row.Controls.Add(btnCheck);
+
+            // "Install" button — only when installable and not yet installed
+            Button? btnInstall = null;
+            if (prerequisite.CanInstall && prerequisite.Status != PrerequisiteStatus.Installed)
+            {
+                btnInstall = new Button
+                {
+                    Text = "Install",
+                    Left = rowWidth - rightMargin - btnW,
+                    Top = 36,
+                    Width = btnW,
+                    Height = btnH,
+                    Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                };
+                row.Controls.Add(btnInstall);
+            }
+
+            // ── Left-side info labels ────────────────────────────────────────
+
+            var leftWidth = rowWidth - rightMargin - btnW - 12;
+
+            // Name
             var lblName = new Label
             {
                 Text = prerequisite.Name,
                 Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold),
                 Left = 8,
                 Top = 8,
-                Width = 180,
+                Width = leftWidth,
                 Height = 18,
                 AutoSize = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
             row.Controls.Add(lblName);
 
-            // Description label
-            var lblDesc = new Label
-            {
-                Text = prerequisite.Description,
-                Left = 8,
-                Top = 30,
-                Width = 190,
-                Height = 30,
-                AutoSize = false,
-            };
-            row.Controls.Add(lblDesc);
-
-            // Status label
+            // Status (coloured, below name on the left side)
             var (statusText, statusColor) = GetStatusDisplay(prerequisite.Status);
             var lblStatus = new Label
             {
                 Text = statusText,
                 ForeColor = statusColor,
-                Left = 210,
-                Top = 8,
-                Width = 90,
-                Height = 18,
+                Left = 8,
+                Top = 28,
+                Width = leftWidth,
+                Height = 16,
                 AutoSize = false,
-                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
-                Tag = prerequisite,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             };
             row.Controls.Add(lblStatus);
 
-            // Install button (only when install is possible and not yet installed)
-            if (prerequisite.CanInstall && prerequisite.Status != PrerequisiteStatus.Installed)
+            // Description
+            var lblDesc = new Label
             {
-                var localPrereq = prerequisite; // capture for lambda
-                var localLblStatus = lblStatus;
+                Text = prerequisite.Description,
+                Left = 8,
+                Top = 46,
+                Width = leftWidth,
+                Height = 24,
+                AutoSize = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            };
+            row.Controls.Add(lblDesc);
 
-                var btnInstall = new Button
-                {
-                    Text = "Install",
-                    Left = 210,
-                    Top = 32,
-                    Width = 80,
-                    Height = 24,
-                    Tag = prerequisite,
-                };
+            // ── Progress text area (full width, bottom of row) ───────────────
+            var txtProgress = new TextBox
+            {
+                Left = 8,
+                Top = 74,
+                Width = rowWidth - 16,
+                Height = 30,
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                BorderStyle = BorderStyle.None,
+                BackColor = System.Drawing.SystemColors.Control,
+                ForeColor = System.Drawing.SystemColors.GrayText,
+                Font = new System.Drawing.Font(Font.FontFamily, Font.Size - 0.5f),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Text = GetStatusHint(prerequisite.Status),
+                TabStop = false,
+            };
+            row.Controls.Add(txtProgress);
 
-                btnInstall.Click += async (_, _) =>
+            // ── Button event handlers ────────────────────────────────────────
+
+            var localPrereq = prerequisite;
+
+            btnCheck.Click += async (_, _) =>
+            {
+                if (IsDisposed || !IsHandleCreated) return;
+
+                btnCheck.Enabled = false;
+                if (btnInstall is not null) btnInstall.Enabled = false;
+
+                lblStatus.Text = "Checking…";
+                lblStatus.ForeColor = System.Drawing.SystemColors.GrayText;
+                txtProgress.Text = "Running check…";
+
+                _logger.LogInformation("User-initiated check for prerequisite '{Id}'", localPrereq.Id);
+
+                await localPrereq.CheckAsync();
+
+                if (IsDisposed || !IsHandleCreated) return;
+
+                _logger.LogInformation(
+                    "Check result for prerequisite '{Id}': {Status}", localPrereq.Id, localPrereq.Status);
+
+                var (newText, newColor) = GetStatusDisplay(localPrereq.Status);
+                lblStatus.Text = newText;
+                lblStatus.ForeColor = newColor;
+                txtProgress.Text = GetStatusHint(localPrereq.Status);
+
+                // Rebuild so Install button appears/disappears as needed
+                PopulatePrerequisitesTab();
+            };
+
+            if (btnInstall is not null)
+            {
+                var localBtnInstall = btnInstall;
+
+                localBtnInstall.Click += async (_, _) =>
                 {
-                    btnInstall.Enabled = false;
-                    localLblStatus.Text = "Installing...";
-                    localLblStatus.ForeColor = System.Drawing.Color.DarkOrange;
+                    if (IsDisposed || !IsHandleCreated) return;
+
+                    localBtnInstall.Enabled = false;
+                    btnCheck.Enabled = false;
+                    lblStatus.Text = "Installing…";
+                    lblStatus.ForeColor = System.Drawing.Color.DarkOrange;
+                    txtProgress.ForeColor = System.Drawing.SystemColors.WindowText;
+                    txtProgress.Text = string.Empty;
+
+                    _logger.LogInformation("User-initiated install for prerequisite '{Id}'", localPrereq.Id);
 
                     var progress = new Progress<string>(msg =>
                     {
                         if (IsDisposed || !IsHandleCreated) return;
-                        Invoke(() => localLblStatus.Text = msg.Length > 18 ? msg[..18] + "…" : msg);
+                        Invoke(() =>
+                        {
+                            txtProgress.AppendText((txtProgress.TextLength > 0 ? Environment.NewLine : string.Empty) + msg);
+                            txtProgress.ScrollToCaret();
+                        });
                     });
 
                     await localPrereq.InstallAsync(progress);
 
-                    // Re-check after installation to confirm the real status
+                    // Re-check to confirm real post-install status
                     await localPrereq.CheckAsync();
 
-                    // Rebuild the whole tab so the Install button disappears on success
+                    _logger.LogInformation(
+                        "Post-install check for prerequisite '{Id}': {Status}", localPrereq.Id, localPrereq.Status);
+
+                    // Rebuild the tab (removes Install button on success, re-enables Check)
                     PopulatePrerequisitesTab();
                 };
-
-                row.Controls.Add(btnInstall);
             }
 
             pnlPrerequisites.Controls.Add(row);
@@ -534,6 +627,16 @@ public partial class frmMain : Form, IMainFormView
 
         pnlPrerequisites.ResumeLayout();
     }
+
+    private static string GetStatusHint(PrerequisiteStatus status) => status switch
+    {
+        PrerequisiteStatus.Installed    => "All checks passed. Ready to use.",
+        PrerequisiteStatus.NotInstalled => "Not found. Click Install to set it up.",
+        PrerequisiteStatus.InstallFailed => "Installation failed. Check the log files for details.",
+        PrerequisiteStatus.Checking     => "Running check…",
+        PrerequisiteStatus.Installing   => "Installation in progress…",
+        _                               => string.Empty,
+    };
 
     private static (string text, System.Drawing.Color color) GetStatusDisplay(PrerequisiteStatus status)
         => status switch
