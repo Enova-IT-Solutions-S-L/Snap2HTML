@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Serilog;
 using Serilog.Events;
 using Serilog.Extensions.Logging;
@@ -9,14 +8,22 @@ namespace Snap2HTML.Infrastructure.Logging;
 /// <summary>
 /// Serilog-backed <see cref="IAppLoggerFactory"/> that writes compressed rolling daily log files
 /// to <c>&lt;AppDir&gt;/logs/</c>.
-/// When logging is disabled a <see cref="NullLoggerFactory"/> is returned so call-sites
-/// generate zero overhead.
+/// <para>
+/// A single <see cref="SerilogLoggerFactory"/> is created once and kept for the lifetime of the
+/// process. Because it is constructed without an explicit <see cref="Serilog.Core.Logger"/>, every
+/// <see cref="Microsoft.Extensions.Logging.ILogger"/> it vends routes through
+/// <see cref="Log.Logger"/> (Serilog's global) at call time. Calling <see cref="Configure"/> only
+/// needs to replace <see cref="Log.Logger"/> — all existing <c>ILogger</c> instances immediately
+/// pick up the change without requiring a restart.
+/// </para>
 /// </summary>
 public sealed class AppLoggerFactory : IAppLoggerFactory
 {
-    private ILoggerFactory _loggerFactory = NullLoggerFactory.Instance;
-    private Serilog.Core.Logger? _serilogLogger;
+    // Permanent factory — survives Configure() calls. Uses Log.Logger (global) because
+    // no explicit Serilog logger is passed to the constructor.
+    private readonly SerilogLoggerFactory _loggerFactory;
     private bool _disposed;
+    private string _currentLevel = "Information";
 
     /// <inheritdoc />
     public ILoggerFactory LoggerFactory => _loggerFactory;
@@ -33,6 +40,12 @@ public sealed class AppLoggerFactory : IAppLoggerFactory
         var appDir = Path.GetDirectoryName(Environment.ProcessPath)
                      ?? AppDomain.CurrentDomain.BaseDirectory;
         LogDirectory = Path.Combine(appDir, "logs");
+
+        // Start silent; Configure() will set Log.Logger when logging is enabled.
+        Log.Logger = Serilog.Core.Logger.None;
+
+        // The factory is created once. It uses Log.Logger via Serilog's global pipeline.
+        _loggerFactory = new SerilogLoggerFactory(dispose: false);
     }
 
     /// <inheritdoc />
@@ -40,26 +53,24 @@ public sealed class AppLoggerFactory : IAppLoggerFactory
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Tear down the previous logger
-        if (_loggerFactory is not NullLoggerFactory)
-        {
-            _loggerFactory.Dispose();
-            _loggerFactory = NullLoggerFactory.Instance;
-        }
-
-        _serilogLogger?.Dispose();
-        _serilogLogger = null;
-
         IsEnabled = enabled;
+        _currentLevel = minimumLevel;
+
+        // Close the previous global logger (flushes buffered entries to disk).
+        Log.CloseAndFlush();
 
         if (!enabled)
+        {
+            Log.Logger = Serilog.Core.Logger.None;
             return;
+        }
 
         Directory.CreateDirectory(LogDirectory);
 
         var level = ParseLevel(minimumLevel);
 
-        _serilogLogger = new LoggerConfiguration()
+        // Replacing Log.Logger is enough — all existing ILogger instances route through it.
+        Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Is(level)
             .Enrich.WithProperty("AppVersion", GetAppVersion())
             .WriteTo.File(
@@ -70,42 +81,16 @@ public sealed class AppLoggerFactory : IAppLoggerFactory
                 rollOnFileSizeLimit: true,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
-
-        _loggerFactory = new SerilogLoggerFactory(_serilogLogger, dispose: false);
     }
 
     /// <inheritdoc />
     public void Flush()
     {
-        // Serilog flushes synchronously when the underlying logger is closed
-        _serilogLogger?.Dispose();
+        if (!IsEnabled) return;
 
-        if (IsEnabled)
-        {
-            // Recreate the same sink so logging continues after a flush
-            var level = _serilogLogger is not null
-                ? LogEventLevel.Information   // fallback; real level is already baked in
-                : LogEventLevel.Information;
-
-            Directory.CreateDirectory(LogDirectory);
-
-            _serilogLogger = new LoggerConfiguration()
-                .MinimumLevel.Is(level)
-                .Enrich.WithProperty("AppVersion", GetAppVersion())
-                .WriteTo.File(
-                    path: Path.Combine(LogDirectory, "snap2html-.log"),
-                    rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 5,
-                    fileSizeLimitBytes: 10 * 1024 * 1024,
-                    rollOnFileSizeLimit: true,
-                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
-                .CreateLogger();
-
-            if (_loggerFactory is not NullLoggerFactory)
-                _loggerFactory.Dispose();
-
-            _loggerFactory = new SerilogLoggerFactory(_serilogLogger, dispose: false);
-        }
+        // CloseAndFlush writes remaining buffered entries, then Configure reopens the sink.
+        Log.CloseAndFlush();
+        Configure(true, _currentLevel);
     }
 
     /// <inheritdoc />
@@ -114,10 +99,8 @@ public sealed class AppLoggerFactory : IAppLoggerFactory
         if (_disposed) return;
         _disposed = true;
 
-        if (_loggerFactory is not NullLoggerFactory)
-            _loggerFactory.Dispose();
-
-        _serilogLogger?.Dispose();
+        Log.CloseAndFlush();
+        _loggerFactory.Dispose();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
